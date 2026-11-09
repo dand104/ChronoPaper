@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">ChronoPaper</string>
     <string name="wallpaper_service_label">ChronoPaper Dynamic Engine</string>
-    <string name="wallpaper_service_description">Dynamic wallpaper engine with Material You theme sync, sun position tracking (SunCalc), and Apple .heic support</string>
+    <string name="wallpaper_service_description">Dynamic wallpaper engine with theme sync, sun position tracking, and .heic support</string>
 </resources>

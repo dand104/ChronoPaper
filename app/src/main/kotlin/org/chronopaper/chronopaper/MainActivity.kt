@@ -1,44 +1,25 @@
 package org.chronopaper.chronopaper
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-
-@Composable
-fun Screen() {
-    MaterialTheme {
-        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "ChronoPaper Ready",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-            }
-        }
-    }
-}
+import org.chronopaper.chronopaper.ui.navigation.ChronoNavHost
+import org.chronopaper.chronopaper.ui.theme.ChronoPaperTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val isFromWallpaperSettings =
+            intent.component?.className?.endsWith("WallpaperSettingsActivity") == true ||
+                    !intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+
         setContent {
-            Screen()
+            ChronoPaperTheme {
+                ChronoNavHost(isFromWallpaperSettings = isFromWallpaperSettings)
+            }
         }
     }
 }
