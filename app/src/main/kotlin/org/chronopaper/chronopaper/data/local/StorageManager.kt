@@ -12,32 +12,54 @@ import java.io.FileOutputStream
 import kotlin.math.roundToInt
 
 class StorageManager(
-    private val context: Context
+    context: Context
 ) {
-    private val appContext = context.applicationContext
+    private val appContext = context.applicationContext.createDeviceProtectedStorageContext()
 
     private val wallpapersRootDir: File
         get() = File(appContext.filesDir, "wallpapers").apply { mkdirs() }
 
-    private val pairsDir: File
-        get() = File(wallpapersRootDir, "pairs").apply { mkdirs() }
-
     private val heicDir: File
         get() = File(wallpapersRootDir, "heic").apply { mkdirs() }
+    private val pairsDir: File
+        get() = File(wallpapersRootDir, "pairs").apply { mkdirs() }
 
     fun getHeicPackDirectory(packId: String): File =
         File(heicDir, packId).apply { mkdirs() }
 
-    suspend fun copyAndOptimizeImage(
-        sourceUri: Uri,
+    suspend fun copyAndOptimizeImages(
+        sourceUris: List<Uri>,
         pairId: String,
-        isDark: Boolean,
         targetWidth: Int,
         targetHeight: Int
-    ): File = withContext(Dispatchers.IO) {
-        val suffix = if (isDark) "dark" else "light"
-        val outFile = File(pairsDir, "${pairId}_$suffix.webp")
-        val tempFile = File(pairsDir, "${pairId}_$suffix.webp.tmp")
+    ): List<File> = withContext(Dispatchers.IO) {
+        require(sourceUris.isNotEmpty()) { "At least one image is required" }
+        val savedFiles = mutableListOf<File>()
+        try {
+            sourceUris.forEachIndexed { index, uri ->
+                val outFile = File(pairsDir, "${pairId}_frame_$index.webp")
+                decodeAndCompressUriToFile(
+                    sourceUri = uri,
+                    outFile = outFile,
+                    targetWidth = targetWidth,
+                    targetHeight = targetHeight
+                )
+                savedFiles.add(outFile)
+            }
+            savedFiles
+        } catch (t: Throwable) {
+            savedFiles.forEach { it.delete() }
+            throw t
+        }
+    }
+
+    private fun decodeAndCompressUriToFile(
+        sourceUri: Uri,
+        outFile: File,
+        targetWidth: Int,
+        targetHeight: Int
+    ): File {
+        val tempFile = File(outFile.parentFile, "${outFile.name}.tmp")
 
         val source = ImageDecoder.createSource(appContext.contentResolver, sourceUri)
         val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
@@ -73,7 +95,7 @@ class StorageManager(
         } finally {
             bitmap.recycle()
         }
-        outFile
+        return outFile
     }
 
     suspend fun readUriBytes(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
@@ -81,9 +103,8 @@ class StorageManager(
             ?: throw IllegalArgumentException("Unable to open InputStream for $uri")
     }
 
-    suspend fun deletePairFiles(lightPath: String, darkPath: String) = withContext(Dispatchers.IO) {
-        File(lightPath).delete()
-        File(darkPath).delete()
+    suspend fun deleteSetFiles(paths: List<String>) = withContext(Dispatchers.IO) {
+        paths.distinct().forEach { path -> File(path).delete() }
     }
 
     suspend fun deleteHeicPackFiles(packId: String) = withContext(Dispatchers.IO) {

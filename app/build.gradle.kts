@@ -36,6 +36,16 @@ android {
         compose = true
     }
 }
+
+kotlin {
+    compilerOptions {
+        optIn.addAll(
+            "androidx.compose.material3.ExperimentalMaterial3Api",
+            "androidx.compose.material3.ExperimentalMaterial3ExpressiveApi"
+        )
+    }
+}
+
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))

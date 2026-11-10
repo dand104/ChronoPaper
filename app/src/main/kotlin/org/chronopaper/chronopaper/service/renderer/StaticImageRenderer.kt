@@ -6,17 +6,21 @@ import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.util.LruCache
 import android.view.SurfaceHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.chronopaper.chronopaper.data.parser.HeicFrameExtractor
 import org.chronopaper.chronopaper.domain.model.ActiveWallpaperState
 import java.io.File
+import kotlin.math.roundToInt
 
 class StaticImageRenderer : WallpaperRenderer {
 
     private val renderLock = Any()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val drawMatrix = Matrix()
+    private val colorsCache = LruCache<String, WallpaperColors>(MAX_COLOR_CACHE_ENTRIES)
 
     private var currentBitmap: Bitmap? = null
     private var currentColors: WallpaperColors? = null
@@ -40,14 +44,18 @@ class StaticImageRenderer : WallpaperRenderer {
             }
 
             is ActiveWallpaperState.StaticBitmap -> {
+                val targetW: Int
+                val targetH: Int
                 synchronized(renderLock) {
                     isNightFallback = state.isNightMode
                     if (state.filePath == loadedFilePath && currentBitmap != null) {
                         return false
                     }
+                    targetW = surfaceWidth
+                    targetH = surfaceHeight
                 }
 
-                val decoded = decodeHardwareBitmapAndColors(state.filePath)
+                val decoded = decodeHardwareBitmapAndColors(state.filePath, targetW, targetH)
                 synchronized(renderLock) {
                     if (decoded == null) {
                         clearBitmapLocked()
@@ -79,20 +87,32 @@ class StaticImageRenderer : WallpaperRenderer {
         }
     }
 
-    override fun draw(holder: SurfaceHolder) {
-        if (!holder.surface.isValid) return
+    override fun draw(holder: SurfaceHolder): Boolean {
+        if (!holder.surface.isValid) return false
 
-        val canvas = runCatching { holder.lockHardwareCanvas() }.getOrNull() ?: return
+        val canvas = runCatching { holder.lockHardwareCanvas() }.getOrNull()
+            ?: runCatching { holder.lockCanvas() }.getOrNull()
+            ?: return false
         try {
             synchronized(renderLock) {
-                val bgColor = if (isNightFallback) DARK_FALLBACK_COLOR else LIGHT_FALLBACK_COLOR
-                canvas.drawColor(bgColor)
+                var bitmap = currentBitmap
 
-                val bitmap = currentBitmap
                 if (bitmap != null && !bitmap.isRecycled) {
+                    if (!canvas.isHardwareAccelerated && bitmap.config == Bitmap.Config.HARDWARE) {
+                        val softwareCopy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                        if (softwareCopy != null) {
+                            currentBitmap = softwareCopy
+                            bitmap.recycle()
+                            bitmap = softwareCopy
+                        }
+                    }
                     canvas.drawBitmap(bitmap, drawMatrix, bitmapPaint)
+                } else {
+                    val bgColor = if (isNightFallback) DARK_FALLBACK_COLOR else LIGHT_FALLBACK_COLOR
+                    canvas.drawColor(bgColor)
                 }
             }
+            return true
         } finally {
             runCatching { holder.unlockCanvasAndPost(canvas) }
         }
@@ -102,6 +122,7 @@ class StaticImageRenderer : WallpaperRenderer {
         synchronized(renderLock) {
             clearBitmapLocked()
             currentColors = null
+            colorsCache.evictAll()
         }
     }
 
@@ -139,18 +160,47 @@ class StaticImageRenderer : WallpaperRenderer {
     }
 
     private suspend fun decodeHardwareBitmapAndColors(
-        filePath: String
+        filePath: String,
+        targetWidth: Int,
+        targetHeight: Int
     ): Pair<Bitmap, WallpaperColors>? = withContext(Dispatchers.IO) {
         val file = File(filePath)
         if (!file.exists() || !file.canRead()) return@withContext null
 
         runCatching {
             val source = ImageDecoder.createSource(file)
-            val bitmap = ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+            val hardwareBitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_HARDWARE
+                val srcW = info.size.width
+                val srcH = info.size.height
+                val scale = HeicFrameExtractor.computeOptimalScale(
+                    srcWidth = srcW,
+                    srcHeight = srcH,
+                    targetWidth = targetWidth,
+                    targetHeight = targetHeight
+                )
+                if (scale < 1f) {
+                    decoder.setTargetSize(
+                        (srcW * scale).roundToInt().coerceAtLeast(1),
+                        (srcH * scale).roundToInt().coerceAtLeast(1)
+                    )
+                }
             }
-            val colors = WallpaperColors.fromBitmap(bitmap)
-            bitmap to colors
+            val cachedColors = synchronized(colorsCache) { colorsCache.get(filePath) }
+            val colors = cachedColors ?: run {
+                val thumbBitmap = ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.setTargetSize(COLOR_SAMPLE_DIMENSION, COLOR_SAMPLE_DIMENSION)
+                }
+                try {
+                    WallpaperColors.fromBitmap(thumbBitmap).also { computed ->
+                        synchronized(colorsCache) { colorsCache.put(filePath, computed) }
+                    }
+                } finally {
+                    thumbBitmap.recycle()
+                }
+            }
+            hardwareBitmap to colors
         }.getOrNull()
     }
 
@@ -160,6 +210,8 @@ class StaticImageRenderer : WallpaperRenderer {
     }
 
     companion object {
+        private const val MAX_COLOR_CACHE_ENTRIES = 32
+        private const val COLOR_SAMPLE_DIMENSION = 112
         private const val DARK_FALLBACK_COLOR = 0xFF121212.toInt()
         private const val LIGHT_FALLBACK_COLOR = 0xFFF5F5F5.toInt()
     }

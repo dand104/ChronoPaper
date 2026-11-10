@@ -1,6 +1,5 @@
 package org.chronopaper.chronopaper.domain.usecase
 
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.domain.repository.WallpaperRepository
 
@@ -8,42 +7,26 @@ class RotatePlaylistUseCase(
     private val repository: WallpaperRepository
 ) {
     suspend operator fun invoke(): String? {
-        val currentSettings = repository.settings.value
+        val pairs = repository.pairedSets.value.map { PlaylistEntry.Manual(it.id, it.mode) }
+        val packs = repository.heicPacks.value.map { PlaylistEntry.Heic(it.id, it.mode) }
+        val allEntries = pairs + packs
+        if (allEntries.isEmpty()) return null
 
-        return when (currentSettings.mode) {
-            WallpaperMode.STATIC_PAIR,
-            WallpaperMode.PLAYLIST -> rotatePairedSets(currentSettings.activePairId)
+        val settings = repository.settings.value
+        val activeId = settings.activeHeicPackId ?: settings.activePairId
+        val currentIndex = allEntries.indexOfFirst { it.id == activeId }
+        val nextEntry = allEntries[if (currentIndex == -1) 0 else (currentIndex + 1) % allEntries.size]
 
-            WallpaperMode.APPLE_SOLAR,
-            WallpaperMode.APPLE_APR -> rotateHeicPacks(currentSettings.activeHeicPackId)
+        when (nextEntry) {
+            is PlaylistEntry.Manual -> repository.setActivePair(nextEntry.id, nextEntry.mode)
+            is PlaylistEntry.Heic -> repository.setActiveHeicPack(nextEntry.id, nextEntry.mode)
         }
+        return nextEntry.id
     }
-
-    private suspend fun rotatePairedSets(currentId: String?): String? {
-        val pairs = repository.pairedSets.value
-        if (pairs.isEmpty()) return null
-
-        val currentIndex = pairs.indexOfFirst { it.id == currentId }
-        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % pairs.size
-        val nextPairId = pairs[nextIndex].id
-
-        repository.setActivePair(nextPairId)
-        return nextPairId
-    }
-
-    private suspend fun rotateHeicPacks(currentPackId: String?): String? {
-        val packs = repository.heicPacks.value
-        if (packs.isEmpty()) return null
-
-        val currentIndex = packs.indexOfFirst { it.id == currentPackId }
-        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % packs.size
-        val nextPack = packs[nextIndex]
-        val nextMode = when (nextPack.scheduleType) {
-            HeicScheduleType.SOLAR -> WallpaperMode.APPLE_SOLAR
-            HeicScheduleType.APPEARANCE -> WallpaperMode.APPLE_APR
-        }
-
-        repository.setActiveHeicPack(nextPack.id, nextMode)
-        return nextPack.id
+    private sealed interface PlaylistEntry {
+        val id: String
+        val mode: WallpaperMode
+        data class Manual(override val id: String, override val mode: WallpaperMode) : PlaylistEntry
+        data class Heic(override val id: String, override val mode: WallpaperMode) : PlaylistEntry
     }
 }

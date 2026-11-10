@@ -19,6 +19,7 @@ object HeicFrameExtractor {
         val pitmBoxOffset: Int,
         val pitmHeaderSize: Int,
         val pitmVersion: Int,
+        val originalPitmId: Int,
         val masterItemIds: List<Int>
     )
 
@@ -73,13 +74,15 @@ object HeicFrameExtractor {
         targetHeight: Int,
         outputFile: File
     ) {
-        val targetItemId = layout.masterItemIds.getOrElse(frameIndex) { frameIndex + 1 }
-        overwritePitmId(
-            heicBytes = heicBytes,
-            pitmBoxOffset = layout.pitmBoxOffset,
-            pitmHeaderSize = layout.pitmHeaderSize,
-            newItemId = targetItemId
-        )
+        if (layout.masterItemIds.size > 1 || frameIndex > 0) {
+            val targetItemId = layout.masterItemIds.getOrElse(frameIndex) { layout.originalPitmId }
+            overwritePitmId(
+                heicBytes = heicBytes,
+                pitmBoxOffset = layout.pitmBoxOffset,
+                pitmHeaderSize = layout.pitmHeaderSize,
+                newItemId = targetItemId
+            )
+        }
 
         val source = ImageDecoder.createSource(ByteBuffer.wrap(heicBytes))
         val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
@@ -149,6 +152,7 @@ object HeicFrameExtractor {
         var pitmHeaderSize = 8
         var pitmVersion = 0
         var masterIds: List<Int> = emptyList()
+        var originalPitmId = 1
 
         var offset = metaStart
         while (offset + 8 <= metaEnd) {
@@ -162,6 +166,15 @@ object HeicFrameExtractor {
                         pitmOffset = offset
                         pitmHeaderSize = headerSize
                         pitmVersion = heicBytes[offset + headerSize].toInt() and 0xFF
+                        val idPos = offset + headerSize + 4
+                        if (pitmVersion == 0 && idPos + 2 <= metaEnd) {
+                            originalPitmId = ((heicBytes[idPos].toInt() and 0xFF) shl 8) or
+                                    (heicBytes[idPos + 1].toInt() and 0xFF)
+                        } else if (pitmVersion > 0 && idPos + 4 <= metaEnd) {
+                            originalPitmId = ByteBuffer.wrap(heicBytes, idPos, 4)
+                                .order(ByteOrder.BIG_ENDIAN)
+                                .int
+                        }
                     }
                 }
 
@@ -180,11 +193,17 @@ object HeicFrameExtractor {
         require(pitmOffset != -1) {
             "HEIC 'meta' box does not contain a valid 'pitm' box"
         }
+
+        val resolvedMasterIds = masterIds.ifEmpty {
+            if (originalPitmId > 0) listOf(originalPitmId) else listOf(1)
+        }
+
         return HeicContainerLayout(
             pitmBoxOffset = pitmOffset,
             pitmHeaderSize = pitmHeaderSize,
             pitmVersion = pitmVersion,
-            masterItemIds = masterIds
+            originalPitmId = originalPitmId,
+            masterItemIds = resolvedMasterIds
         )
     }
 

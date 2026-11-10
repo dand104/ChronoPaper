@@ -7,6 +7,7 @@ import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
+import java.util.Calendar
 
 class ResolveCurrentFrameUseCase {
 
@@ -17,114 +18,145 @@ class ResolveCurrentFrameUseCase {
         isNightMode: Boolean,
         epochMillis: Long = System.currentTimeMillis()
     ): ActiveWallpaperState {
-        return when (settings.mode) {
-            WallpaperMode.STATIC_PAIR,
-            WallpaperMode.PLAYLIST -> resolvePairedSet(
-                settings = settings,
-                pairedSets = pairedSets,
-                isNightMode = isNightMode
-            )
+        val activeHeic = settings.activeHeicPackId?.let { id ->
+            heicPacks.firstOrNull { it.id == id }
+        }
+        val activePair = settings.activePairId?.let { id ->
+            pairedSets.firstOrNull { it.id == id }
+        }
 
-            WallpaperMode.APPLE_APR -> resolveHeicAppearance(
-                settings = settings,
-                heicPacks = heicPacks,
-                isNightMode = isNightMode
-            )
-
-            WallpaperMode.APPLE_SOLAR -> resolveHeicSolar(
-                settings = settings,
-                heicPacks = heicPacks,
-                isNightMode = isNightMode,
-                epochMillis = epochMillis
-            )
+        return when {
+            activeHeic != null -> resolvePack(activeHeic, settings, isNightMode, epochMillis)
+            activePair != null -> resolvePair(activePair, settings, isNightMode, epochMillis)
+            pairedSets.isNotEmpty() -> resolvePair(pairedSets.first(), settings, isNightMode, epochMillis)
+            heicPacks.isNotEmpty() -> resolvePack(heicPacks.first(), settings, isNightMode, epochMillis)
+            else -> ActiveWallpaperState.Fallback(isNightMode)
         }
     }
 
-    private fun resolvePairedSet(
+    private fun resolvePair(
+        pair: PairedWallpaperSet,
         settings: UserSettings,
-        pairedSets: List<PairedWallpaperSet>,
-        isNightMode: Boolean
-    ): ActiveWallpaperState {
-        val targetSet = pairedSets.firstOrNull { it.id == settings.activePairId }
-            ?: pairedSets.firstOrNull()
-            ?: return ActiveWallpaperState.Fallback(isNightMode)
+        isNightMode: Boolean,
+        epochMillis: Long
+    ): ActiveWallpaperState = resolveFrames(
+        sourceId = pair.id,
+        frames = pair.toSolarFrames(),
+        allowedModes = pair.allowedModes,
+        defaultMode = pair.mode,
+        lightDefaultIndex = 0,
+        darkDefaultIndex = (pair.frameCount - 1).coerceAtLeast(0),
+        settings = settings,
+        isNightMode = isNightMode,
+        epochMillis = epochMillis
+    )
 
-        val path = if (isNightMode) targetSet.darkPath else targetSet.lightPath
-        return ActiveWallpaperState.StaticBitmap(
-            filePath = path,
-            isNightMode = isNightMode,
-            mode = settings.mode,
-            sourceId = targetSet.id
-        )
-    }
-
-    private fun resolveHeicAppearance(
+    private fun resolvePack(
+        pack: DynamicHeicPack,
         settings: UserSettings,
-        heicPacks: List<DynamicHeicPack>,
-        isNightMode: Boolean
-    ): ActiveWallpaperState {
-        val pack = heicPacks.firstOrNull { it.id == settings.activeHeicPackId }
-            ?: heicPacks.firstOrNull()
-            ?: return ActiveWallpaperState.Fallback(isNightMode)
+        isNightMode: Boolean,
+        epochMillis: Long
+    ): ActiveWallpaperState = resolveFrames(
+        sourceId = pack.id,
+        frames = pack.frames,
+        allowedModes = pack.allowedModes,
+        defaultMode = pack.mode,
+        lightDefaultIndex = pack.lightDefaultIndex,
+        darkDefaultIndex = pack.darkDefaultIndex,
+        settings = settings,
+        isNightMode = isNightMode,
+        epochMillis = epochMillis
+    )
 
-        val frame = selectAppearanceFrame(pack, isNightMode)
-            ?: return ActiveWallpaperState.Fallback(isNightMode)
-
-        return ActiveWallpaperState.StaticBitmap(
-            filePath = frame.filePath,
-            isNightMode = isNightMode,
-            mode = WallpaperMode.APPLE_APR,
-            sourceId = pack.id
-        )
-    }
-
-    private fun resolveHeicSolar(
+    private fun resolveFrames(
+        sourceId: String,
+        frames: List<SolarFrame>,
+        allowedModes: List<WallpaperMode>,
+        defaultMode: WallpaperMode,
+        lightDefaultIndex: Int?,
+        darkDefaultIndex: Int?,
         settings: UserSettings,
-        heicPacks: List<DynamicHeicPack>,
         isNightMode: Boolean,
         epochMillis: Long
     ): ActiveWallpaperState {
-        val pack = heicPacks.firstOrNull { it.id == settings.activeHeicPackId }
-            ?: heicPacks.firstOrNull()
-            ?: return ActiveWallpaperState.Fallback(isNightMode)
+        if (frames.isEmpty()) return ActiveWallpaperState.Fallback(isNightMode)
 
+        val effectiveMode = if (settings.mode in allowedModes) settings.mode else defaultMode
+        val selectedFrame = when (effectiveMode) {
+            WallpaperMode.THEME -> selectThemeFrame(frames, lightDefaultIndex, darkDefaultIndex, isNightMode)
+            WallpaperMode.SOLAR -> selectSolarFrame(frames, lightDefaultIndex, darkDefaultIndex, settings, isNightMode, epochMillis)
+            WallpaperMode.TIME -> selectTimeFrame(frames, epochMillis)
+        }
+
+        return ActiveWallpaperState.StaticBitmap(
+            filePath = selectedFrame.filePath,
+            isNightMode = isNightMode,
+            mode = effectiveMode,
+            sourceId = sourceId
+        )
+    }
+
+    private fun selectThemeFrame(
+        frames: List<SolarFrame>,
+        lightDefaultIndex: Int?,
+        darkDefaultIndex: Int?,
+        isNightMode: Boolean
+    ): SolarFrame {
+        val preferredIndex = if (isNightMode) darkDefaultIndex else lightDefaultIndex
+        if (preferredIndex != null) {
+            frames.firstOrNull { it.frameIndex == preferredIndex }?.let { return it }
+        }
+        return if (isNightMode) {
+            frames.firstOrNull { it.isDarkDefault } ?: frames.last()
+        } else {
+            frames.firstOrNull { it.isLightDefault } ?: frames.first()
+        }
+    }
+
+    private fun selectSolarFrame(
+        frames: List<SolarFrame>,
+        lightDefaultIndex: Int?,
+        darkDefaultIndex: Int?,
+        settings: UserSettings,
+        isNightMode: Boolean,
+        epochMillis: Long
+    ): SolarFrame {
+        if (frames.size == 1) return frames.first()
         val sunPos = SunCalc.calculatePosition(
             epochMillis = epochMillis,
             latitudeDegrees = settings.location.latitude,
             longitudeDegrees = settings.location.longitude
         )
-
-        val bestFrame = pack.frames.minByOrNull { frame ->
+        if (frames.size == 2) {
+            return selectThemeFrame(
+                frames = frames,
+                lightDefaultIndex = lightDefaultIndex,
+                darkDefaultIndex = darkDefaultIndex,
+                isNightMode = sunPos.altitudeDegrees < 0.0
+            )
+        }
+        return frames.minByOrNull { frame ->
             SunCalc.angularDistanceDegrees(
                 alt1Deg = sunPos.altitudeDegrees,
                 az1Deg = sunPos.azimuthDegrees,
                 alt2Deg = frame.altitude,
                 az2Deg = frame.azimuth
             )
-        } ?: selectAppearanceFrame(pack, isNightMode)
-        ?: return ActiveWallpaperState.Fallback(isNightMode)
-
-        return ActiveWallpaperState.StaticBitmap(
-            filePath = bestFrame.filePath,
-            isNightMode = isNightMode,
-            mode = WallpaperMode.APPLE_SOLAR,
-            sourceId = pack.id
-        )
+        } ?: selectThemeFrame(frames, lightDefaultIndex, darkDefaultIndex, isNightMode)
     }
 
-    private fun selectAppearanceFrame(
-        pack: DynamicHeicPack,
-        isNightMode: Boolean
-    ): SolarFrame? {
-        if (pack.frames.isEmpty()) return null
-        val preferredIndex = if (isNightMode) pack.darkDefaultIndex else pack.lightDefaultIndex
-        if (preferredIndex != null) {
-            pack.frames.firstOrNull { it.frameIndex == preferredIndex }?.let { return it }
-        }
-        return if (isNightMode) {
-            pack.frames.firstOrNull { it.isDarkDefault } ?: pack.frames.last()
+    private fun selectTimeFrame(
+        frames: List<SolarFrame>,
+        epochMillis: Long
+    ): SolarFrame {
+        if (frames.size == 1) return frames.first()
+        val calendar = Calendar.getInstance().apply { timeInMillis = epochMillis }
+        val minutesOfDay = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+        return if (frames.size == 2) {
+            if (minutesOfDay in 360..<1080) frames.first() else frames.last()
         } else {
-            pack.frames.firstOrNull { it.isLightDefault } ?: pack.frames.first()
+            val index = ((minutesOfDay / 1440.0) * frames.size).toInt().coerceIn(0, frames.lastIndex)
+            frames[index]
         }
     }
 }

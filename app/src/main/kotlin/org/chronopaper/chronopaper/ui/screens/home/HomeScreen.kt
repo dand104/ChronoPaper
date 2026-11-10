@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,13 +24,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -54,12 +54,12 @@ import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.service.ChronoWallpaperService
 import org.chronopaper.chronopaper.ui.components.ChronoIcons
 import org.chronopaper.chronopaper.ui.components.LocalWallpaperThumbnail
+import org.chronopaper.chronopaper.ui.theme.ExpressiveActivationBar
 import java.util.Locale
 
 @Composable
 fun HomeScreen(
-    onNavigateToPairs: () -> Unit,
-    onNavigateToHeic: () -> Unit,
+    onNavigateToWallpapers: () -> Unit,
     isFromWallpaperSettings: Boolean = false,
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
 ) {
@@ -98,13 +98,11 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "ChronoPaper",
-                        style = MaterialTheme.typography.displaySmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                Text(
+                    text = "ChronoPaper",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 EngineStatusBadge(isActive = isLiveWallpaperActive)
             }
         }
@@ -112,12 +110,12 @@ fun HomeScreen(
         item {
             HeroPreviewCard(
                 title = state.activeTitle,
+                formatLabel = state.activeFormatLabel,
                 mode = state.settings.mode,
                 filePath = previewFilePath,
                 isPreviewNight = isPreviewNight,
-                solarAltitude = state.solarPosition.altitudeDegrees,
-                solarAzimuth = state.solarPosition.azimuthDegrees,
                 isServiceActive = isLiveWallpaperActive,
+                hasAnyWallpaper = state.hasAnyWallpaper,
                 isFromWallpaperSettings = isFromWallpaperSettings,
                 onTogglePreviewTheme = { viewModel.togglePreviewTheme(systemDark) },
                 onRotateNow = viewModel::rotateNow,
@@ -126,57 +124,98 @@ fun HomeScreen(
         }
 
         item {
-            Text(
-                text = "Variants",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-
-        item {
-            ModeSelectorGrid(
-                selectedMode = state.settings.mode,
-                pairsCount = state.pairsCount,
-                heicCount = state.heicPacksCount,
-                rotationHours = state.settings.rotationIntervalHours,
-                onSelectMode = viewModel::selectMode
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                FilledTonalButton(
-                    onClick = onNavigateToPairs,
-                    shape = RoundedCornerShape(22.dp),
-                    contentPadding = PaddingValues(vertical = 16.dp, horizontal = 16.dp),
-                    modifier = Modifier.weight(1f)
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = ChronoIcons.Pairs,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Pairs (${state.pairsCount})")
-                }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Activation mode",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Text(
+                                text = modeSubtitle(state.settings.mode),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
-                FilledTonalButton(
-                    onClick = onNavigateToHeic,
-                    shape = RoundedCornerShape(22.dp),
-                    contentPadding = PaddingValues(vertical = 16.dp, horizontal = 16.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        imageVector = ChronoIcons.Solar,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
+                    ExpressiveActivationBar(
+                        selectedMode = state.settings.mode,
+                        allowedModes = state.allowedModes,
+                        onSelectMode = viewModel::selectMode,
+                        tall = true
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("HEIC (${state.heicPacksCount})")
                 }
+            }
+        }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .clickable { viewModel.toggleAutoRotate(!state.settings.autoRotateEnabled) }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Playlist auto-rotation",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "Cycle sets every ${state.settings.rotationIntervalHours}h (${state.totalCollectionsCount} total)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = state.settings.autoRotateEnabled,
+                        onCheckedChange = null
+                    )
+                }
+            }
+        }
+
+        item {
+            FilledTonalButton(
+                onClick = onNavigateToWallpapers,
+                shape = RoundedCornerShape(28.dp),
+                contentPadding = PaddingValues(vertical = 18.dp, horizontal = 24.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = ChronoIcons.Pairs,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Manage sets (${state.totalCollectionsCount})",
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         }
     }
@@ -225,12 +264,12 @@ private fun EngineStatusBadge(isActive: Boolean) {
 @Composable
 private fun HeroPreviewCard(
     title: String,
+    formatLabel: String,
     mode: WallpaperMode,
     filePath: String?,
     isPreviewNight: Boolean,
-    solarAltitude: Double,
-    solarAzimuth: Double,
     isServiceActive: Boolean,
+    hasAnyWallpaper: Boolean,
     isFromWallpaperSettings: Boolean = false,
     onTogglePreviewTheme: () -> Unit,
     onRotateNow: () -> Unit,
@@ -264,7 +303,7 @@ private fun HeroPreviewCard(
                                 colors = listOf(
                                     Color.Black.copy(alpha = 0.28f),
                                     Color.Transparent,
-                                    Color.Black.copy(alpha = 0.72f)
+                                    Color.Black.copy(alpha = 0.75f)
                                 )
                             )
                         )
@@ -278,23 +317,6 @@ private fun HeroPreviewCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.45f),
-                        contentColor = Color.White
-                    ) {
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "Sun: %.1f° alt. · %.0f° az.",
-                                solarAltitude,
-                                solarAzimuth
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalIconButton(onClick = onTogglePreviewTheme) {
                             Icon(
@@ -302,11 +324,13 @@ private fun HeroPreviewCard(
                                 contentDescription = "Toggle Day/Night preview"
                             )
                         }
-                        FilledTonalIconButton(onClick = onRotateNow) {
-                            Icon(
-                                imageVector = ChronoIcons.Refresh,
-                                contentDescription = "Next clip"
-                            )
+                        if (hasAnyWallpaper) {
+                            FilledTonalIconButton(onClick = onRotateNow) {
+                                Icon(
+                                    imageVector = ChronoIcons.Refresh,
+                                    contentDescription = "Next set"
+                                )
+                            }
                         }
                     }
                 }
@@ -316,19 +340,19 @@ private fun HeroPreviewCard(
                         .align(Alignment.BottomStart)
                         .padding(20.dp)
                 ) {
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = title,
                         style = MaterialTheme.typography.headlineMedium,
                         color = Color.White
                     )
                     Text(
-                        text = modeTitle(mode),
+                        text = "$formatLabel · ${modeTitle(mode)}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.85f)
                     )
                 }
             }
+
             if (!isFromWallpaperSettings) {
                 Row(
                     modifier = Modifier
@@ -339,7 +363,8 @@ private fun HeroPreviewCard(
                 ) {
                     Button(
                         onClick = onActivateService,
-                        shape = RoundedCornerShape(24.dp),
+                        enabled = hasAnyWallpaper,
+                        shape = RoundedCornerShape(28.dp),
                         contentPadding = PaddingValues(vertical = 16.dp, horizontal = 20.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isServiceActive) {
@@ -362,10 +387,10 @@ private fun HeroPreviewCard(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = if (isServiceActive) {
-                                "Open the live wallpaper system screen"
-                            } else {
-                                "Set ChronoPaper as wallpaper"
+                            text = when {
+                                !hasAnyWallpaper -> "Add a wallpaper set first"
+                                isServiceActive -> "Open system live wallpaper screen"
+                                else -> "Set ChronoPaper as wallpaper"
                             },
                             style = MaterialTheme.typography.labelLarge
                         )
@@ -376,111 +401,16 @@ private fun HeroPreviewCard(
     }
 }
 
-@Composable
-private fun ModeSelectorGrid(
-    selectedMode: WallpaperMode,
-    pairsCount: Int,
-    heicCount: Int,
-    rotationHours: Int,
-    onSelectMode: (WallpaperMode) -> Unit
-) {
-    val items = listOf(
-        Triple(
-            WallpaperMode.STATIC_PAIR,
-            "Paired Day / Night",
-            "Response on the system theme ($pairsCount pcs.)"
-        ),
-        Triple(
-            WallpaperMode.PLAYLIST,
-            "Pairs playlist",
-            "Automatic change every $rotationHours hours."
-        ),
-        Triple(
-            WallpaperMode.APPLE_SOLAR,
-            "Solar HEIC",
-            "Along the path of the sun ($heicCount pcs.)"
-        ),
-        Triple(
-            WallpaperMode.APPLE_APR,
-            "Day/Night from .heic",
-            "Daytime and nighttime shot in .heic"
-        )
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (rowItems in items.chunked(2)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                for ((mode, title, subtitle) in rowItems) {
-                    val isSelected = selectedMode == mode
-                    Card(
-                        onClick = { onSelectMode(mode) },
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            }
-                        ),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = when (mode) {
-                                        WallpaperMode.STATIC_PAIR,
-                                        WallpaperMode.PLAYLIST -> ChronoIcons.Pairs
-
-                                        WallpaperMode.APPLE_SOLAR,
-                                        WallpaperMode.APPLE_APR -> ChronoIcons.Solar
-                                    },
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = ChronoIcons.Check,
-                                        contentDescription = "Selected",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isSelected) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+private fun modeTitle(mode: WallpaperMode): String = when (mode) {
+    WallpaperMode.THEME -> "System theme"
+    WallpaperMode.SOLAR -> "By sun position"
+    WallpaperMode.TIME -> "By time schedule"
 }
 
-private fun modeTitle(mode: WallpaperMode): String = when (mode) {
-    WallpaperMode.STATIC_PAIR -> "Synchronization with the system theme"
-    WallpaperMode.PLAYLIST -> "Paired wallpapers playlist by schedule"
-    WallpaperMode.APPLE_SOLAR -> "Astronomical calculation of the sun's height"
-    WallpaperMode.APPLE_APR -> "Day and night mode from HEIC"
+private fun modeSubtitle(mode: WallpaperMode): String = when (mode) {
+    WallpaperMode.THEME -> "Switches frames with system theme"
+    WallpaperMode.SOLAR -> "Follows sun altitude & azimuth"
+    WallpaperMode.TIME -> "Distributes frames across the clock"
 }
 
 private fun isChronoServiceActive(context: Context): Boolean {

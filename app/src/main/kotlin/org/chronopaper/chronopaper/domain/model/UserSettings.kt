@@ -15,7 +15,7 @@ data class GeoCoordinate(
 }
 
 data class UserSettings(
-    val mode: WallpaperMode = WallpaperMode.STATIC_PAIR,
+    val mode: WallpaperMode = WallpaperMode.THEME,
     val activePairId: String? = null,
     val activeHeicPackId: String? = null,
     val autoRotateEnabled: Boolean = false,
@@ -23,7 +23,7 @@ data class UserSettings(
     val location: GeoCoordinate = DEFAULT_LOCATION
 ) {
     val isPeriodicRotationActive: Boolean
-        get() = autoRotateEnabled || mode == WallpaperMode.PLAYLIST
+        get() = autoRotateEnabled
 
     companion object {
         val DEFAULT_LOCATION = GeoCoordinate(latitude = 55.7558, longitude = 37.6173)

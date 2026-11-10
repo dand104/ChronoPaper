@@ -2,8 +2,11 @@ package org.chronopaper.chronopaper.data.parser
 
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
+import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
+import kotlin.math.PI
+import kotlin.math.cos
 
 object HeicXmpExtractor {
     private val SOLAR_ATTR_REGEX = Regex(
@@ -22,20 +25,66 @@ object HeicXmpExtractor {
         """<apple_desktop:apr>\s*([^<]+?)\s*</apple_desktop:apr>""",
         RegexOption.IGNORE_CASE
     )
+    private val H24_ATTR_REGEX = Regex(
+        """apple_desktop:h24\s*=\s*["']([^"']+)["']""",
+        RegexOption.IGNORE_CASE
+    )
+    private val H24_TAG_REGEX = Regex(
+        """<apple_desktop:h24>\s*([^<]+?)\s*</apple_desktop:h24>""",
+        RegexOption.IGNORE_CASE
+    )
     private val WHITESPACE_REGEX = Regex("""\s+""")
 
-    fun extractMetadata(heicBytes: ByteArray): HeicAppleMetadata {
+    fun extractMetadata(
+        heicBytes: ByteArray,
+        fallbackFrameCount: Int = 1
+    ): HeicAppleMetadata {
         val xmpXml = extractRawXmpXml(heicBytes)
-            ?: throw IllegalArgumentException("No XMP metadata found in HEIC file")
+        val base64Payload = xmpXml?.let(::findBase64Payload)
+        if (base64Payload != null) {
+            runCatching {
+                val cleanBase64 = base64Payload.replace(WHITESPACE_REGEX, "")
+                val plistBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                BinaryPlistDecoder.decodeAppleMetadata(plistBytes)
+            }.onSuccess { return it }
+        }
+        return createFallbackMetadata(fallbackFrameCount)
+    }
 
-        val base64Payload = findBase64Payload(xmpXml)
-            ?: throw IllegalArgumentException(
-                "No apple_desktop:solar or apple_desktop:apr tag found in XMP"
+    internal fun createFallbackMetadata(frameCount: Int): HeicAppleMetadata {
+        val count = frameCount.coerceAtLeast(1)
+        return when (count) {
+            1 -> HeicAppleMetadata(
+                mode = WallpaperMode.THEME,
+                solarEntries = emptyList(),
+                lightIndex = 0,
+                darkIndex = 0
             )
 
-        val cleanBase64 = base64Payload.replace(WHITESPACE_REGEX, "")
-        val plistBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-        return BinaryPlistDecoder.decodeAppleMetadata(plistBytes)
+            2 -> HeicAppleMetadata(
+                mode = WallpaperMode.THEME,
+                solarEntries = emptyList(),
+                lightIndex = 0,
+                darkIndex = 1
+            )
+
+            else -> {
+                val entries = List(count) { index ->
+                    val progress = index.toDouble() / count.toDouble()
+                    HeicSolarEntry(
+                        frameIndex = index,
+                        altitude = -cos(progress * 2.0 * PI) * 60.0,
+                        azimuth = (progress * 360.0).mod(360.0)
+                    )
+                }
+                HeicAppleMetadata(
+                    mode = WallpaperMode.SOLAR,
+                    solarEntries = entries,
+                    lightIndex = entries.maxByOrNull { it.altitude }?.frameIndex ?: (count / 2),
+                    darkIndex = entries.minByOrNull { it.altitude }?.frameIndex ?: 0
+                )
+            }
+        }
     }
 
     fun extractRawXmpXml(heicBytes: ByteArray): String? {
@@ -66,6 +115,8 @@ object HeicXmpExtractor {
         SOLAR_TAG_REGEX.find(xmpXml)?.groupValues?.getOrNull(1)?.let { return it }
         APR_ATTR_REGEX.find(xmpXml)?.groupValues?.getOrNull(1)?.let { return it }
         APR_TAG_REGEX.find(xmpXml)?.groupValues?.getOrNull(1)?.let { return it }
+        H24_ATTR_REGEX.find(xmpXml)?.groupValues?.getOrNull(1)?.let { return it }
+        H24_TAG_REGEX.find(xmpXml)?.groupValues?.getOrNull(1)?.let { return it }
         return null
     }
 
@@ -77,7 +128,7 @@ object HeicXmpExtractor {
         while (i <= max) {
             if (source[i] != first) {
                 while (++i <= max && source[i] != first) {
-                    // scan until the first byte match
+                    // scan until first byte match
                 }
             }
             if (i <= max) {

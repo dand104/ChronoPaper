@@ -2,6 +2,7 @@ package org.chronopaper.chronopaper.ui.navigation
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -24,22 +25,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import org.chronopaper.chronopaper.ui.components.ChronoIcons
-import org.chronopaper.chronopaper.ui.screens.heic.HeicImportScreen
 import org.chronopaper.chronopaper.ui.screens.home.HomeScreen
 import org.chronopaper.chronopaper.ui.screens.pairs.PairedSetsScreen
 import org.chronopaper.chronopaper.ui.screens.settings.SettingsScreen
-import org.chronopaper.chronopaper.ui.theme.ExpressiveMotion
 
 enum class ChronoDestination(
     val label: String,
     val icon: ImageVector
 ) {
     HOME("Home", ChronoIcons.Home),
-    PAIRS("Pairs", ChronoIcons.Pairs),
-    HEIC("Solar", ChronoIcons.Solar),
+    WALLPAPERS("Wallpapers", ChronoIcons.Pairs),
     SETTINGS("Settings", ChronoIcons.Settings)
 }
 
@@ -50,6 +49,8 @@ fun ChronoNavHost(
 ) {
     var currentDestination by rememberSaveable { mutableStateOf(ChronoDestination.HOME) }
     val stateHolder = rememberSaveableStateHolder()
+
+    val motionScheme = MaterialTheme.motionScheme
 
     BackHandler(enabled = currentDestination != ChronoDestination.HOME) {
         currentDestination = ChronoDestination.HOME
@@ -65,13 +66,23 @@ fun ChronoNavHost(
             ) {
                 ChronoDestination.entries.forEach { destination ->
                     val isSelected = currentDestination == destination
+
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.15f else 1f,
+                        animationSpec = motionScheme.defaultSpatialSpec(),
+                        label = "NavIconScale"
+                    )
                     NavigationBarItem(
                         selected = isSelected,
                         onClick = { currentDestination = destination },
                         icon = {
                             Icon(
                                 imageVector = destination.icon,
-                                contentDescription = destination.label
+                                contentDescription = destination.label,
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                }
                             )
                         },
                         label = {
@@ -100,11 +111,11 @@ fun ChronoNavHost(
             AnimatedContent(
                 targetState = currentDestination,
                 transitionSpec = {
-                    (fadeIn(ExpressiveMotion.effectsStandard()) +
-                            scaleIn(initialScale = 0.96f, animationSpec = ExpressiveMotion.spatialStandard()))
+                    (fadeIn(motionScheme.defaultEffectsSpec()) +
+                            scaleIn(initialScale = 0.94f, animationSpec = motionScheme.defaultSpatialSpec()))
                         .togetherWith(
-                            fadeOut(ExpressiveMotion.effectsStandard()) +
-                                    scaleOut(targetScale = 0.98f, animationSpec = ExpressiveMotion.spatialStandard())
+                            fadeOut(motionScheme.fastEffectsSpec()) +
+                                    scaleOut(targetScale = 0.96f, animationSpec = motionScheme.fastSpatialSpec())
                         )
                 },
                 label = "ChronoScreenTransition"
@@ -113,12 +124,10 @@ fun ChronoNavHost(
                     when (destination) {
                         ChronoDestination.HOME -> HomeScreen(
                             isFromWallpaperSettings = isFromWallpaperSettings,
-                            onNavigateToPairs = { currentDestination = ChronoDestination.PAIRS },
-                            onNavigateToHeic = { currentDestination = ChronoDestination.HEIC }
+                            onNavigateToWallpapers = { currentDestination = ChronoDestination.WALLPAPERS }
                         )
 
-                        ChronoDestination.PAIRS -> PairedSetsScreen()
-                        ChronoDestination.HEIC -> HeicImportScreen()
+                        ChronoDestination.WALLPAPERS -> PairedSetsScreen()
                         ChronoDestination.SETTINGS -> SettingsScreen()
                     }
                 }

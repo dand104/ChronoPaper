@@ -283,6 +283,105 @@ object ChronoIcons {
         }
     }
 
+    val Clock: ImageVector by lazy {
+        vectorIcon("Clock") {
+            moveTo(12f, 2f)
+            curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12f)
+            curveTo(2f, 17.52f, 6.48f, 22f, 12f, 22f)
+            curveTo(17.52f, 22f, 22f, 17.52f, 22f, 12f)
+            curveTo(22f, 6.48f, 17.52f, 2f, 12f, 2f)
+            close()
+            moveTo(12f, 20f)
+            curveTo(7.59f, 20f, 4f, 16.41f, 4f, 12f)
+            curveTo(4f, 7.59f, 7.59f, 4f, 12f, 4f)
+            curveTo(16.41f, 4f, 20f, 7.59f, 20f, 12f)
+            curveTo(20f, 16.41f, 16.41f, 20f, 12f, 20f)
+            close()
+            moveTo(12.5f, 7f)
+            horizontalLineTo(11f)
+            verticalLineTo(13f)
+            lineTo(16.25f, 16.15f)
+            lineTo(17f, 14.92f)
+            lineTo(12.5f, 12.25f)
+            close()
+        }
+    }
+
+    val Edit: ImageVector by lazy {
+        vectorIcon("Edit") {
+            moveTo(3f, 17.25f)
+            verticalLineTo(21f)
+            horizontalLineTo(6.75f)
+            lineTo(17.81f, 9.94f)
+            lineTo(14.06f, 6.19f)
+            lineTo(3f, 17.25f)
+            close()
+            moveTo(20.71f, 7.04f)
+            curveTo(21.1f, 6.65f, 21.1f, 6.02f, 20.71f, 5.63f)
+            lineTo(18.37f, 3.29f)
+            curveTo(17.98f, 2.9f, 17.35f, 2.9f, 16.96f, 3.29f)
+            lineTo(15.13f, 5.12f)
+            lineTo(18.88f, 8.87f)
+            lineTo(20.71f, 7.04f)
+            close()
+        }
+    }
+
+    val Swap: ImageVector by lazy {
+        vectorIcon("Swap") {
+            moveTo(6.99f, 11f)
+            lineTo(3f, 15f)
+            lineTo(6.99f, 19f)
+            verticalLineTo(16f)
+            horizontalLineTo(14f)
+            verticalLineTo(14f)
+            horizontalLineTo(6.99f)
+            verticalLineTo(11f)
+            close()
+            moveTo(21f, 9f)
+            lineTo(17.01f, 5f)
+            verticalLineTo(8f)
+            horizontalLineTo(10f)
+            verticalLineTo(10f)
+            horizontalLineTo(17.01f)
+            verticalLineTo(13f)
+            lineTo(21f, 9f)
+            close()
+        }
+    }
+
+    val GitHub: ImageVector by lazy {
+        vectorIcon("GitHub") {
+            moveTo(12f, 2f)
+            curveTo(6.48f, 2f, 2f, 6.58f, 2f, 12.26f)
+            curveTo(2f, 16.79f, 4.87f, 20.63f, 8.84f, 21.99f)
+            curveTo(9.34f, 22.08f, 9.52f, 21.77f, 9.52f, 21.5f)
+            curveTo(9.52f, 21.26f, 9.51f, 20.46f, 9.51f, 19.61f)
+            curveTo(6.73f, 20.23f, 6.14f, 18.4f, 6.14f, 18.4f)
+            curveTo(5.69f, 17.22f, 5.03f, 16.9f, 5.03f, 16.9f)
+            curveTo(4.12f, 16.26f, 5.1f, 16.28f, 5.1f, 16.28f)
+            curveTo(6.1f, 16.35f, 6.63f, 17.34f, 6.63f, 17.34f)
+            curveTo(7.52f, 18.91f, 8.97f, 18.46f, 9.54f, 18.2f)
+            curveTo(9.63f, 17.54f, 9.89f, 17.09f, 10.18f, 16.83f)
+            curveTo(7.96f, 16.57f, 5.62f, 15.69f, 5.62f, 11.75f)
+            curveTo(5.62f, 10.63f, 6.01f, 9.71f, 6.65f, 8.99f)
+            curveTo(6.55f, 8.73f, 6.2f, 7.69f, 6.75f, 6.28f)
+            curveTo(6.75f, 6.28f, 7.59f, 6f, 9.5f, 7.33f)
+            curveTo(10.3f, 7.1f, 11.15f, 6.99f, 12f, 6.99f)
+            curveTo(12.85f, 6.99f, 13.7f, 7.1f, 14.5f, 7.33f)
+            curveTo(16.41f, 6f, 17.25f, 6.28f, 17.25f, 6.28f)
+            curveTo(17.8f, 7.69f, 17.45f, 8.73f, 17.35f, 8.99f)
+            curveTo(17.99f, 9.71f, 18.38f, 10.63f, 18.38f, 11.75f)
+            curveTo(18.38f, 15.7f, 16.04f, 16.57f, 13.81f, 16.82f)
+            curveTo(14.17f, 17.14f, 14.49f, 17.77f, 14.49f, 18.74f)
+            curveTo(14.49f, 20.13f, 14.48f, 21.15f, 14.48f, 21.5f)
+            curveTo(14.48f, 21.77f, 14.66f, 22.09f, 15.17f, 21.99f)
+            curveTo(19.13f, 20.63f, 22f, 16.79f, 22f, 12.26f)
+            curveTo(22f, 6.58f, 17.52f, 2f, 12f, 2f)
+            close()
+        }
+    }
+
     private fun vectorIcon(
         name: String,
         block: PathBuilder.() -> Unit

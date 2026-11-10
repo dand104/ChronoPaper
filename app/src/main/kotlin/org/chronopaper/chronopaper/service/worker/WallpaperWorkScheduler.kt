@@ -1,6 +1,10 @@
 package org.chronopaper.chronopaper.service.worker
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.UserManager
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -16,7 +20,7 @@ import java.util.concurrent.TimeUnit
 
 class WallpaperWorkScheduler(
     private val context: Context,
-    private val repository: WallpaperRepository
+    private val repositoryProvider: () -> WallpaperRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val workManager: WorkManager
@@ -29,7 +33,7 @@ class WallpaperWorkScheduler(
 
     fun startObservingSettings() {
         scope.launch {
-            repository.settings
+            repositoryProvider().settings
                 .map {
                     ScheduleConfig(
                         isPeriodicRotationActive = it.isPeriodicRotationActive,
@@ -44,6 +48,21 @@ class WallpaperWorkScheduler(
     }
 
     private fun applySchedule(config: ScheduleConfig) {
+        val userManager = context.getSystemService(UserManager::class.java)
+        if (userManager != null && !userManager.isUserUnlocked) {
+            val unlockReceiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    runCatching { context.unregisterReceiver(this) }
+                    enqueueOrCancelWork(config)
+                }
+            }
+            context.registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_UNLOCKED))
+            return
+        }
+        enqueueOrCancelWork(config)
+    }
+
+    private fun enqueueOrCancelWork(config: ScheduleConfig) = runCatching {
         if (config.isPeriodicRotationActive) {
             val interval = config.rotationIntervalHours.toLong().coerceAtLeast(1L)
             val constraints = Constraints.Builder()

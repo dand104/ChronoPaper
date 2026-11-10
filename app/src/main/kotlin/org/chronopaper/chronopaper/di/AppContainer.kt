@@ -45,7 +45,9 @@ class AppContainer(context: Context) {
     }
 
     val workScheduler: WallpaperWorkScheduler by lazy {
-        WallpaperWorkScheduler(appContext, wallpaperRepository)
+        WallpaperWorkScheduler(appContext) {
+            wallpaperRepository
+        }
     }
 
     fun notifyFrameRefreshRequested() {

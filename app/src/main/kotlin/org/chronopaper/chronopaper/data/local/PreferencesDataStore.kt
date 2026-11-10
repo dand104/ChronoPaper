@@ -1,6 +1,7 @@
 package org.chronopaper.chronopaper.data.local
 
 import android.content.Context
+import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +11,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
@@ -18,12 +18,13 @@ import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import androidx.core.content.edit
 
 class PreferencesDataStore(
     context: Context
 ) {
-    private val appContext = context.applicationContext
+    private val appContext = context.applicationContext.createDeviceProtectedStorageContext().also { deContext ->
+        deContext.moveSharedPreferencesFrom(context.applicationContext, PREFS_NAME)
+    }
     private val writeMutex = Mutex()
 
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -96,7 +97,7 @@ class PreferencesDataStore(
         val mode = WallpaperMode.fromNameOrDefault(prefs.getString(KEY_MODE, null))
         val activePairId = prefs.getString(KEY_ACTIVE_PAIR_ID, null)
         val activeHeicId = prefs.getString(KEY_ACTIVE_HEIC_ID, null)
-        val autoRotate = prefs.getBoolean(KEY_AUTO_ROTATE_ENABLED, mode == WallpaperMode.PLAYLIST)
+        val autoRotate = prefs.getBoolean(KEY_AUTO_ROTATE_ENABLED, false)
         val intervalHours = prefs.getInt(KEY_ROTATION_INTERVAL_HOURS, 24).coerceIn(1, 168)
         val lat = Double.fromBits(
             prefs.getLong(KEY_LATITUDE_BITS, UserSettings.DEFAULT_LOCATION.latitude.toRawBits())
@@ -137,12 +138,16 @@ class PreferencesDataStore(
             val loadedPairs = buildList(pairsArray.length()) {
                 for (i in 0..<pairsArray.length()) {
                     val obj = pairsArray.getJSONObject(i)
+                    val pathsJson = obj.getJSONArray("imagePaths")
+                    val imagePaths = List(pathsJson.length()) { j -> pathsJson.getString(j) }
+                    val defaultMode = if (imagePaths.size > 2) WallpaperMode.SOLAR else WallpaperMode.THEME
+
                     add(
                         PairedWallpaperSet(
                             id = obj.getString("id"),
                             title = obj.getString("title"),
-                            lightPath = obj.getString("lightPath"),
-                            darkPath = obj.getString("darkPath"),
+                            imagePaths = imagePaths,
+                            mode = WallpaperMode.fromNameOrDefault(obj.optString("mode", defaultMode.name)),
                             createdAtEpochMillis = obj.optLong("createdAt", 0L)
                         )
                     )
@@ -169,16 +174,12 @@ class PreferencesDataStore(
                             )
                         }
                     }
-                    val scheduleName = obj.optString("scheduleType", HeicScheduleType.SOLAR.name)
-                    val scheduleType = HeicScheduleType.entries
-                        .firstOrNull { it.name == scheduleName }
-                        ?: HeicScheduleType.SOLAR
 
                     add(
                         DynamicHeicPack(
                             id = obj.getString("id"),
                             title = obj.getString("title"),
-                            scheduleType = scheduleType,
+                            mode = WallpaperMode.fromNameOrDefault(obj.optString("mode", WallpaperMode.SOLAR.name)),
                             frames = frames,
                             lightDefaultIndex = if (obj.has("lightDefaultIndex")) {
                                 obj.getInt("lightDefaultIndex")
@@ -206,14 +207,16 @@ class PreferencesDataStore(
     ) = withContext(Dispatchers.IO) {
         val root = JSONObject()
         val pairsArray = JSONArray()
-        for ((id, title, lightPath, darkPath, createdAtEpochMillis) in pairs) {
+        for (pair in pairs) {
+            val pathsArray = JSONArray()
+            pair.imagePaths.forEach { pathsArray.put(it) }
             pairsArray.put(
                 JSONObject()
-                    .put("id", id)
-                    .put("title", title)
-                    .put("lightPath", lightPath)
-                    .put("darkPath", darkPath)
-                    .put("createdAt", createdAtEpochMillis)
+                    .put("id", pair.id)
+                    .put("title", pair.title)
+                    .put("imagePaths", pathsArray)
+                    .put("mode", pair.mode.name)
+                    .put("createdAt", pair.createdAtEpochMillis)
             )
         }
         root.put("pairs", pairsArray)
@@ -235,7 +238,7 @@ class PreferencesDataStore(
             val packObj = JSONObject()
                 .put("id", pack.id)
                 .put("title", pack.title)
-                .put("scheduleType", pack.scheduleType.name)
+                .put("mode", pack.mode.name)
                 .put("frames", framesArray)
                 .put("createdAt", pack.createdAtEpochMillis)
             pack.lightDefaultIndex?.let { packObj.put("lightDefaultIndex", it) }
@@ -243,7 +246,6 @@ class PreferencesDataStore(
             heicArray.put(packObj)
         }
         root.put("heicPacks", heicArray)
-
         val tmpFile = File(collectionsFile.parentFile, "$COLLECTIONS_FILE_NAME.tmp")
         tmpFile.writeText(root.toString())
         if (!tmpFile.renameTo(collectionsFile)) {

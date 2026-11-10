@@ -10,7 +10,6 @@ import org.chronopaper.chronopaper.data.parser.HeicFrameExtractor
 import org.chronopaper.chronopaper.data.parser.HeicXmpExtractor
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
@@ -28,66 +27,170 @@ class DefaultWallpaperRepository(
     override val pairedSets: StateFlow<List<PairedWallpaperSet>> = dataStore.pairedSets
     override val heicPacks: StateFlow<List<DynamicHeicPack>> = dataStore.heicPacks
 
-    override suspend fun createPairedSet(
+    override suspend fun createManualSet(
         title: String,
-        lightUri: Uri,
-        darkUri: Uri,
+        imageUris: List<Uri>,
+        mode: WallpaperMode,
         targetWidth: Int,
         targetHeight: Int,
         activateImmediately: Boolean
     ): PairedWallpaperSet {
+        require(imageUris.isNotEmpty()) {
+            "Select at least one image"
+        }
         val pairId = UUID.randomUUID().toString()
-        val lightFile = storageManager.copyAndOptimizeImage(
-            sourceUri = lightUri,
+        val files = storageManager.copyAndOptimizeImages(
+            sourceUris = imageUris,
             pairId = pairId,
-            isDark = false,
             targetWidth = targetWidth,
             targetHeight = targetHeight
         )
-        val darkFile = try {
-            storageManager.copyAndOptimizeImage(
-                sourceUri = darkUri,
-                pairId = pairId,
-                isDark = true,
-                targetWidth = targetWidth,
-                targetHeight = targetHeight
-            )
-        } catch (t: Throwable) {
-            lightFile.delete()
-            throw t
+        val paths = files.map { it.absolutePath }
+        val resolvedMode = when {
+            paths.size == 1 -> WallpaperMode.THEME
+            paths.size > 2 && mode == WallpaperMode.THEME -> WallpaperMode.SOLAR
+            else -> mode
         }
 
         val pairedSet = PairedWallpaperSet(
             id = pairId,
             title = title,
-            lightPath = lightFile.absolutePath,
-            darkPath = darkFile.absolutePath
+            imagePaths = paths,
+            mode = resolvedMode
         )
         dataStore.upsertPairedSet(pairedSet)
 
         if (activateImmediately) {
             dataStore.updateSettings { current ->
                 current.copy(
-                    mode = if (current.mode == WallpaperMode.PLAYLIST) {
-                        WallpaperMode.PLAYLIST
-                    } else {
-                        WallpaperMode.STATIC_PAIR
-                    },
-                    activePairId = pairId
+                    mode = resolvedMode,
+                    activePairId = pairId,
+                    activeHeicPackId = null
                 )
             }
         }
         return pairedSet
     }
 
+    override suspend fun updateManualSet(
+        pairId: String,
+        title: String,
+        sources: List<String>,
+        mode: WallpaperMode,
+        targetWidth: Int,
+        targetHeight: Int
+    ) {
+        require(sources.isNotEmpty()) { "Select at least one image" }
+        val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
+        val resolvedPaths = mutableListOf<String>()
+        val newlyCreatedFiles = mutableListOf<String>()
+
+        try {
+            for (src in sources) {
+                if (!src.startsWith("content://") && File(src).exists()) {
+                    resolvedPaths.add(src)
+                } else {
+                    val saved = storageManager.copyAndOptimizeImages(
+                        sourceUris = listOf(Uri.parse(src)),
+                        pairId = "${pairId}_${UUID.randomUUID().toString().take(6)}",
+                        targetWidth = targetWidth,
+                        targetHeight = targetHeight
+                    ).first().absolutePath
+                    newlyCreatedFiles.add(saved)
+                    resolvedPaths.add(saved)
+                }
+            }
+        } catch (t: Throwable) {
+            storageManager.deleteSetFiles(newlyCreatedFiles)
+            throw t
+        }
+
+        val removedOldFiles = existing.imagePaths.filterNot { it in resolvedPaths }
+        if (removedOldFiles.isNotEmpty()) {
+            storageManager.deleteSetFiles(removedOldFiles)
+        }
+
+        val resolvedMode = when {
+            resolvedPaths.size == 1 -> WallpaperMode.THEME
+            resolvedPaths.size > 2 && mode == WallpaperMode.THEME -> WallpaperMode.SOLAR
+            else -> mode
+        }
+
+        val updatedSet = existing.copy(
+            title = title.trim().ifEmpty { existing.title },
+            imagePaths = resolvedPaths,
+            mode = resolvedMode
+        )
+        dataStore.upsertPairedSet(updatedSet)
+
+        if (settings.value.activePairId == pairId) {
+            dataStore.updateSettings { it.copy(mode = resolvedMode) }
+        }
+    }
+
+    override suspend fun updateHeicPack(
+        packId: String,
+        title: String,
+        mode: WallpaperMode,
+        swapLightDark: Boolean
+    ) {
+        val existing = heicPacks.value.firstOrNull { it.id == packId } ?: return
+        val resolvedMode = if (mode in existing.allowedModes) mode else existing.mode
+        val currentLight = existing.lightDefaultIndex ?: existing.frames.firstOrNull { it.isLightDefault }?.frameIndex ?: 0
+        val currentDark = existing.darkDefaultIndex ?: existing.frames.firstOrNull { it.isDarkDefault }?.frameIndex ?: existing.frames.lastIndex.coerceAtLeast(0)
+        val newLight = if (swapLightDark) currentDark else currentLight
+        val newDark = if (swapLightDark) currentLight else currentDark
+        val updatedFrames = if (swapLightDark) {
+            existing.frames.map { frame ->
+                frame.copy(
+                    isLightDefault = frame.frameIndex == newLight,
+                    isDarkDefault = frame.frameIndex == newDark
+                )
+            }
+        } else {
+            existing.frames
+        }
+
+        val updatedPack = existing.copy(
+            title = title.trim().ifEmpty { existing.title },
+            mode = resolvedMode,
+            frames = updatedFrames,
+            lightDefaultIndex = newLight,
+            darkDefaultIndex = newDark
+        )
+        dataStore.upsertHeicPack(updatedPack)
+
+        if (settings.value.activeHeicPackId == packId) {
+            dataStore.updateSettings { it.copy(mode = resolvedMode) }
+        }
+    }
+
     override suspend fun deletePairedSet(pairId: String) {
         val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
-        storageManager.deletePairFiles(existing.lightPath, existing.darkPath)
+        storageManager.deleteSetFiles(existing.imagePaths)
         dataStore.removePairedSet(pairId)
 
         if (settings.value.activePairId == pairId) {
-            val nextFallbackId = pairedSets.value.firstOrNull()?.id
-            dataStore.updateSettings { it.copy(activePairId = nextFallbackId) }
+            val nextPair = pairedSets.value.firstOrNull()
+            val fallbackHeic = heicPacks.value.firstOrNull()
+            dataStore.updateSettings { current ->
+                when {
+                    nextPair != null -> current.copy(
+                        activePairId = nextPair.id,
+                        activeHeicPackId = null,
+                        mode = nextPair.mode
+                    )
+                    fallbackHeic != null -> current.copy(
+                        activePairId = null,
+                        activeHeicPackId = fallbackHeic.id,
+                        mode = fallbackHeic.mode
+                    )
+                    else -> current.copy(
+                        activePairId = null,
+                        activeHeicPackId = null
+                    )
+                }
+            }
         }
     }
 
@@ -99,8 +202,12 @@ class DefaultWallpaperRepository(
         activateImmediately: Boolean
     ): DynamicHeicPack = withContext(Dispatchers.IO) {
         val heicBytes = storageManager.readUriBytes(sourceUri)
-        val metadata = HeicXmpExtractor.extractMetadata(heicBytes)
         val layout = HeicFrameExtractor.inspectContainer(heicBytes)
+
+        val metadata = HeicXmpExtractor.extractMetadata(
+            heicBytes = heicBytes,
+            fallbackFrameCount = layout.masterItemIds.size.coerceAtLeast(1)
+        )
 
         val packId = UUID.randomUUID().toString()
         val packDir = storageManager.getHeicPackDirectory(packId)
@@ -146,8 +253,8 @@ class DefaultWallpaperRepository(
                     val file = extractedFiles[index] ?: return@mapNotNull null
                     SolarFrame(
                         frameIndex = index,
-                        azimuth = 180.0,
-                        altitude = if (index == metadata.darkIndex) -30.0 else 45.0,
+                        azimuth = if (index == metadata.darkIndex) 0.0 else 180.0,
+                        altitude = if (index == metadata.darkIndex) -45.0 else 45.0,
                         filePath = file.absolutePath,
                         isLightDefault = index == metadata.lightIndex,
                         isDarkDefault = index == metadata.darkIndex
@@ -158,7 +265,7 @@ class DefaultWallpaperRepository(
             val pack = DynamicHeicPack(
                 id = packId,
                 title = title,
-                scheduleType = metadata.scheduleType,
+                mode = metadata.mode,
                 frames = frames,
                 lightDefaultIndex = metadata.lightIndex,
                 darkDefaultIndex = metadata.darkIndex
@@ -166,14 +273,11 @@ class DefaultWallpaperRepository(
             dataStore.upsertHeicPack(pack)
 
             if (activateImmediately) {
-                val targetMode = when (metadata.scheduleType) {
-                    HeicScheduleType.SOLAR -> WallpaperMode.APPLE_SOLAR
-                    HeicScheduleType.APPEARANCE -> WallpaperMode.APPLE_APR
-                }
                 dataStore.updateSettings { current ->
                     current.copy(
-                        mode = targetMode,
-                        activeHeicPackId = packId
+                        mode = metadata.mode,
+                        activeHeicPackId = packId,
+                        activePairId = null
                     )
                 }
             }
@@ -189,40 +293,83 @@ class DefaultWallpaperRepository(
         dataStore.removeHeicPack(packId)
 
         if (settings.value.activeHeicPackId == packId) {
-            val nextFallbackId = heicPacks.value.firstOrNull()?.id
-            dataStore.updateSettings { it.copy(activeHeicPackId = nextFallbackId) }
+            val nextHeic = heicPacks.value.firstOrNull()
+            val fallbackPair = pairedSets.value.firstOrNull()
+            dataStore.updateSettings { current ->
+                when {
+                    nextHeic != null -> current.copy(
+                        activeHeicPackId = nextHeic.id,
+                        activePairId = null,
+                        mode = nextHeic.mode
+                    )
+                    fallbackPair != null -> current.copy(
+                        activeHeicPackId = null,
+                        activePairId = fallbackPair.id,
+                        mode = fallbackPair.mode
+                    )
+                    else -> current.copy(
+                        activeHeicPackId = null,
+                        activePairId = null
+                    )
+                }
+            }
         }
     }
 
     override suspend fun setActiveMode(mode: WallpaperMode) {
+        val current = settings.value
+        val activePair = pairedSets.value.firstOrNull { it.id == current.activePairId }
+        val activeHeic = heicPacks.value.firstOrNull { it.id == current.activeHeicPackId }
+
+        if (activePair != null && mode in activePair.allowedModes) {
+            dataStore.upsertPairedSet(activePair.copy(mode = mode))
+        } else if (activeHeic != null && mode in activeHeic.allowedModes) {
+            dataStore.upsertHeicPack(activeHeic.copy(mode = mode))
+        }
+
+        dataStore.updateSettings { it.copy(mode = mode) }
+    }
+
+    override suspend fun setActivePair(pairId: String, mode: WallpaperMode?) {
+        val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
+        val resolvedMode = if (mode != null && mode in existing.allowedModes) {
+            mode
+        } else {
+            existing.mode
+        }
+        if (resolvedMode != existing.mode) {
+            dataStore.upsertPairedSet(existing.copy(mode = resolvedMode))
+        }
         dataStore.updateSettings { current ->
             current.copy(
-                mode = mode,
-                autoRotateEnabled = if (mode == WallpaperMode.PLAYLIST) true else current.autoRotateEnabled
+                activePairId = pairId,
+                activeHeicPackId = null,
+                mode = resolvedMode
             )
         }
     }
 
-    override suspend fun setActivePair(pairId: String) {
-        dataStore.updateSettings { it.copy(activePairId = pairId) }
-    }
-
-    override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode) {
-        dataStore.updateSettings { it.copy(activeHeicPackId = packId, mode = mode) }
+    override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode?) {
+        val existing = heicPacks.value.firstOrNull { it.id == packId } ?: return
+        val resolvedMode = if (mode != null && mode in existing.allowedModes) {
+            mode
+        } else {
+            existing.mode
+        }
+        if (resolvedMode != existing.mode) {
+            dataStore.upsertHeicPack(existing.copy(mode = resolvedMode))
+        }
+        dataStore.updateSettings { current ->
+            current.copy(
+                activeHeicPackId = packId,
+                activePairId = null,
+                mode = resolvedMode
+            )
+        }
     }
 
     override suspend fun setAutoRotateEnabled(enabled: Boolean) {
-        dataStore.updateSettings { current ->
-            val adjustedMode = when {
-                enabled && current.mode == WallpaperMode.STATIC_PAIR -> WallpaperMode.PLAYLIST
-                !enabled && current.mode == WallpaperMode.PLAYLIST -> WallpaperMode.STATIC_PAIR
-                else -> current.mode
-            }
-            current.copy(
-                mode = adjustedMode,
-                autoRotateEnabled = enabled
-            )
-        }
+        dataStore.updateSettings { it.copy(autoRotateEnabled = enabled) }
     }
 
     override suspend fun updateRotationIntervalHours(hours: Int) {

@@ -9,7 +9,7 @@ interface WallpaperRenderer {
 
     fun onSurfaceChanged(width: Int, height: Int)
 
-    fun draw(holder: SurfaceHolder)
+    fun draw(holder: SurfaceHolder): Boolean
 
     fun computeColors(): WallpaperColors?
 

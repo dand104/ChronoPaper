@@ -21,14 +21,22 @@ import org.chronopaper.chronopaper.domain.model.WallpaperMode
 
 data class HomeUiState(
     val settings: UserSettings = UserSettings(),
-    val activeTitle: String = "No collection selected",
+    val activeTitle: String = "No collection added yet",
+    val activeFormatLabel: String = "Add a manual set or import .heic",
+    val allowedModes: List<WallpaperMode> = WallpaperMode.entries,
     val activeLightState: ActiveWallpaperState = ActiveWallpaperState.Fallback(isNightMode = false),
     val activeDarkState: ActiveWallpaperState = ActiveWallpaperState.Fallback(isNightMode = true),
     val solarPosition: SolarPosition = SolarPosition(180.0, 45.0),
     val pairsCount: Int = 0,
     val heicPacksCount: Int = 0,
     val previewNightOverride: Boolean? = null
-)
+) {
+    val totalCollectionsCount: Int
+        get() = pairsCount + heicPacksCount
+
+    val hasAnyWallpaper: Boolean
+        get() = totalCollectionsCount > 0
+}
 
 class HomeViewModel(
     private val container: AppContainer
@@ -67,24 +75,44 @@ class HomeViewModel(
             isNightMode = true,
             epochMillis = now
         )
+        val activeHeic = settings.activeHeicPackId?.let { id -> packs.firstOrNull { it.id == id } }
+        val activePair = settings.activePairId?.let { id -> pairs.firstOrNull { it.id == id } }
+        val fallbackPair = pairs.firstOrNull()
+        val fallbackHeic = packs.firstOrNull()
 
-        val title = when (settings.mode) {
-            WallpaperMode.STATIC_PAIR,
-            WallpaperMode.PLAYLIST -> {
-                val pair = pairs.firstOrNull { it.id == settings.activePairId } ?: pairs.firstOrNull()
-                pair?.title ?: "No matching wallpaper"
-            }
-
-            WallpaperMode.APPLE_SOLAR,
-            WallpaperMode.APPLE_APR -> {
-                val pack = packs.firstOrNull { it.id == settings.activeHeicPackId } ?: packs.firstOrNull()
-                pack?.title ?: "No .heic packages"
-            }
+        val (title, formatLabel, allowed) = when {
+            activeHeic != null -> Triple(
+                activeHeic.title,
+                "HEIC container · ${activeHeic.frameCount} frames",
+                activeHeic.allowedModes
+            )
+            activePair != null -> Triple(
+                activePair.title,
+                "Manual set · ${activePair.frameCount} photo(s)",
+                activePair.allowedModes
+            )
+            fallbackPair != null -> Triple(
+                fallbackPair.title,
+                "Manual set · ${fallbackPair.frameCount} photo(s)",
+                fallbackPair.allowedModes
+            )
+            fallbackHeic != null -> Triple(
+                fallbackHeic.title,
+                "HEIC container · ${fallbackHeic.frameCount} frames",
+                fallbackHeic.allowedModes
+            )
+            else -> Triple(
+                "No collection added yet",
+                "Add a manual set or import .heic",
+                WallpaperMode.entries
+            )
         }
 
         HomeUiState(
             settings = settings,
             activeTitle = title,
+            activeFormatLabel = formatLabel,
+            allowedModes = allowed,
             activeLightState = lightState,
             activeDarkState = darkState,
             solarPosition = sunPos,
@@ -101,6 +129,13 @@ class HomeViewModel(
     fun selectMode(mode: WallpaperMode) {
         viewModelScope.launch {
             repository.setActiveMode(mode)
+            container.notifyFrameRefreshRequested()
+        }
+    }
+
+    fun toggleAutoRotate(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setAutoRotateEnabled(enabled)
             container.notifyFrameRefreshRequested()
         }
     }

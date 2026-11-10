@@ -13,14 +13,30 @@ interface WallpaperRepository {
     val pairedSets: StateFlow<List<PairedWallpaperSet>>
     val heicPacks: StateFlow<List<DynamicHeicPack>>
 
-    suspend fun createPairedSet(
+    suspend fun createManualSet(
         title: String,
-        lightUri: Uri,
-        darkUri: Uri,
+        imageUris: List<Uri>,
+        mode: WallpaperMode,
         targetWidth: Int,
         targetHeight: Int,
         activateImmediately: Boolean = true
     ): PairedWallpaperSet
+
+    suspend fun updateManualSet(
+        pairId: String,
+        title: String,
+        sources: List<String>,
+        mode: WallpaperMode,
+        targetWidth: Int,
+        targetHeight: Int
+    ) {}
+
+    suspend fun updateHeicPack(
+        packId: String,
+        title: String,
+        mode: WallpaperMode,
+        swapLightDark: Boolean = false
+    ) {}
 
     suspend fun deletePairedSet(pairId: String)
 
@@ -36,9 +52,9 @@ interface WallpaperRepository {
 
     suspend fun setActiveMode(mode: WallpaperMode)
 
-    suspend fun setActivePair(pairId: String)
+    suspend fun setActivePair(pairId: String, mode: WallpaperMode? = null)
 
-    suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode = WallpaperMode.APPLE_SOLAR)
+    suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode? = null)
 
     suspend fun setAutoRotateEnabled(enabled: Boolean)
 

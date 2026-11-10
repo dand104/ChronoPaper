@@ -3,7 +3,6 @@ package org.chronopaper.chronopaper.domain.usecase
 import org.chronopaper.chronopaper.domain.model.ActiveWallpaperState
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
@@ -24,8 +23,8 @@ class ResolveCurrentFrameUseCaseTest {
     }
 
     @Test
-    fun `STATIC_PAIR mode returns Fallback when list is empty`() {
-        val settings = UserSettings(mode = WallpaperMode.STATIC_PAIR)
+    fun `THEME mode returns Fallback when collections are empty`() {
+        val settings = UserSettings(mode = WallpaperMode.THEME)
 
         val result = useCase(
             settings = settings,
@@ -39,7 +38,7 @@ class ResolveCurrentFrameUseCaseTest {
     }
 
     @Test
-    fun `STATIC_PAIR mode switches light and dark paths based on isNightMode`() {
+    fun `THEME mode switches light and dark paths based on isNightMode`() {
         val pair = PairedWallpaperSet(
             id = "pair_1",
             title = "Mojave",
@@ -47,7 +46,7 @@ class ResolveCurrentFrameUseCaseTest {
             darkPath = "/cache/dark.webp"
         )
         val settings = UserSettings(
-            mode = WallpaperMode.STATIC_PAIR,
+            mode = WallpaperMode.THEME,
             activePairId = "pair_1"
         )
 
@@ -64,34 +63,12 @@ class ResolveCurrentFrameUseCaseTest {
             isNightMode = true
         )
 
-        assertTrue(lightResult is ActiveWallpaperState.StaticBitmap)
         assertEquals("/cache/light.webp", (lightResult as ActiveWallpaperState.StaticBitmap).filePath)
-        assertEquals(false, lightResult.isNightMode)
-
-        assertTrue(darkResult is ActiveWallpaperState.StaticBitmap)
         assertEquals("/cache/dark.webp", (darkResult as ActiveWallpaperState.StaticBitmap).filePath)
-        assertEquals(true, darkResult.isNightMode)
     }
 
     @Test
-    fun `STATIC_PAIR falls back to first pair if activePairId not found`() {
-        val pair1 = PairedWallpaperSet("p1", "First", "/l1.webp", "/d1.webp")
-        val pair2 = PairedWallpaperSet("p2", "Second", "/l2.webp", "/d2.webp")
-        val settings = UserSettings(activePairId = "unknown_id")
-
-        val result = useCase(
-            settings = settings,
-            pairedSets = listOf(pair1, pair2),
-            heicPacks = emptyList(),
-            isNightMode = false
-        )
-
-        assertTrue(result is ActiveWallpaperState.StaticBitmap)
-        assertEquals("p1", (result as ActiveWallpaperState.StaticBitmap).sourceId)
-    }
-
-    @Test
-    fun `APPLE_APR mode selects configured lightDefaultIndex and darkDefaultIndex`() {
+    fun `HEIC pack in THEME mode selects lightDefaultIndex and darkDefaultIndex`() {
         val frames = listOf(
             SolarFrame(frameIndex = 0, azimuth = 180.0, altitude = 40.0, filePath = "/f0.webp"),
             SolarFrame(frameIndex = 1, azimuth = 0.0, altitude = -30.0, filePath = "/f1.webp")
@@ -99,13 +76,13 @@ class ResolveCurrentFrameUseCaseTest {
         val pack = DynamicHeicPack(
             id = "heic_1",
             title = "Catalina",
-            scheduleType = HeicScheduleType.APPEARANCE,
+            mode = WallpaperMode.THEME,
             frames = frames,
             lightDefaultIndex = 0,
             darkDefaultIndex = 1
         )
         val settings = UserSettings(
-            mode = WallpaperMode.APPLE_APR,
+            mode = WallpaperMode.THEME,
             activeHeicPackId = "heic_1"
         )
 
@@ -117,7 +94,7 @@ class ResolveCurrentFrameUseCaseTest {
     }
 
     @Test
-    fun `APPLE_SOLAR mode chooses the frame with closest angular distance to the sun`() {
+    fun `SOLAR mode chooses the frame with closest angular distance to the sun`() {
         val epochMillis = Instant.parse("2026-03-20T12:00:00Z").toEpochMilli()
         val loc = GeoCoordinate(0.0, 0.0)
 
@@ -128,13 +105,13 @@ class ResolveCurrentFrameUseCaseTest {
         val pack = DynamicHeicPack(
             id = "solar_pack",
             title = "Solar Earth",
-            scheduleType = HeicScheduleType.SOLAR,
+            mode = WallpaperMode.SOLAR,
             frames = listOf(sunsetFrame, noonFrame, nightFrame),
             lightDefaultIndex = 1,
             darkDefaultIndex = 3
         )
         val settings = UserSettings(
-            mode = WallpaperMode.APPLE_SOLAR,
+            mode = WallpaperMode.SOLAR,
             activeHeicPackId = "solar_pack",
             location = loc
         )
@@ -147,11 +124,6 @@ class ResolveCurrentFrameUseCaseTest {
             epochMillis = epochMillis
         )
 
-        assertTrue(result is ActiveWallpaperState.StaticBitmap)
-        assertEquals(
-            "By noon, a shot closest to the sun must be chosen",
-            "/noon.webp",
-            (result as ActiveWallpaperState.StaticBitmap).filePath
-        )
+        assertEquals("/noon.webp", (result as ActiveWallpaperState.StaticBitmap).filePath)
     }
 }

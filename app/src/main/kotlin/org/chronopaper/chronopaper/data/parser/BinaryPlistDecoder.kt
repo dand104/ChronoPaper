@@ -1,9 +1,11 @@
 package org.chronopaper.chronopaper.data.parser
 
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
+import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
+import kotlin.math.PI
+import kotlin.math.cos
 
 data class HeicSolarEntry(
     val frameIndex: Int,
@@ -12,7 +14,7 @@ data class HeicSolarEntry(
 )
 
 data class HeicAppleMetadata(
-    val scheduleType: HeicScheduleType,
+    val mode: WallpaperMode,
     val solarEntries: List<HeicSolarEntry>,
     val lightIndex: Int?,
     val darkIndex: Int?
@@ -28,17 +30,10 @@ sealed interface PlistValue {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
-
             other as DataVal
-
-            if (!value.contentEquals(other.value)) return false
-
-            return true
+            return value.contentEquals(other.value)
         }
-
-        override fun hashCode(): Int {
-            return value.contentHashCode()
-        }
+        override fun hashCode(): Int = value.contentHashCode()
     }
 
     data class ArrayVal(val items: List<PlistValue>) : PlistValue
@@ -71,6 +66,7 @@ object BinaryPlistDecoder {
 
         val solarList = (root["si"] ?: root["ap"])?.asArray()
         val aprDict = root["o"]?.asDict() ?: root["apr"]?.asDict() ?: root
+        val timeList = root["ti"]?.asArray()
 
         val lightIndex = aprDict["d"]?.asInt()
         val darkIndex = aprDict["n"]?.asInt()
@@ -89,7 +85,28 @@ object BinaryPlistDecoder {
             }
             if (entries.isNotEmpty()) {
                 return HeicAppleMetadata(
-                    scheduleType = HeicScheduleType.SOLAR,
+                    mode = WallpaperMode.SOLAR,
+                    solarEntries = entries,
+                    lightIndex = lightIndex ?: entries.maxByOrNull { it.altitude }?.frameIndex,
+                    darkIndex = darkIndex ?: entries.minByOrNull { it.altitude }?.frameIndex
+                )
+            }
+        }
+
+        if (!timeList.isNullOrEmpty()) {
+            val entries = timeList.mapNotNull { item ->
+                val dict = item.asDict() ?: return@mapNotNull null
+                val index = dict["i"]?.asInt() ?: return@mapNotNull null
+                val timeFraction = dict["t"]?.asDouble()?.coerceIn(0.0, 1.0) ?: return@mapNotNull null
+                HeicSolarEntry(
+                    frameIndex = index,
+                    altitude = -cos(timeFraction * 2.0 * PI) * 60.0,
+                    azimuth = (timeFraction * 360.0).mod(360.0)
+                )
+            }
+            if (entries.isNotEmpty()) {
+                return HeicAppleMetadata(
+                    mode = WallpaperMode.TIME,
                     solarEntries = entries,
                     lightIndex = lightIndex ?: entries.maxByOrNull { it.altitude }?.frameIndex,
                     darkIndex = darkIndex ?: entries.minByOrNull { it.altitude }?.frameIndex
@@ -99,7 +116,7 @@ object BinaryPlistDecoder {
 
         if (lightIndex != null || darkIndex != null) {
             return HeicAppleMetadata(
-                scheduleType = HeicScheduleType.APPEARANCE,
+                mode = WallpaperMode.THEME,
                 solarEntries = emptyList(),
                 lightIndex = lightIndex ?: darkIndex,
                 darkIndex = darkIndex ?: lightIndex
@@ -149,7 +166,7 @@ object BinaryPlistDecoder {
                 length = offsetIntSize
             ).toInt()
             require(objOffset in HEADER_MAGIC.length..<trailerOffset) {
-                "Object $i offset out of bounds: $objOffset"
+                "Object $i offset out of bounds:$objOffset"
             }
             objOffset
         }

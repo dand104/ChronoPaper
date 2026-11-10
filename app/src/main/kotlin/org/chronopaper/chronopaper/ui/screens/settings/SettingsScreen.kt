@@ -1,13 +1,25 @@
 package org.chronopaper.chronopaper.ui.screens.settings
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,10 +28,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -39,9 +53,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -51,7 +67,9 @@ import org.chronopaper.chronopaper.domain.util.OemBatteryAdvisor
 import org.chronopaper.chronopaper.ui.components.ChronoIcons
 import org.chronopaper.chronopaper.ui.theme.ExpressiveGroupShapes
 import java.util.Locale
-import kotlin.math.abs
+import androidx.core.net.toUri
+
+private val SettingsCardItemModifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
 
 @Composable
 fun SettingsScreen(
@@ -59,11 +77,53 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val motionScheme = MaterialTheme.motionScheme
 
     var showBatteryWarning by remember {
         mutableStateOf(OemBatteryAdvisor.shouldShowBatteryOptimizationWarning(context))
     }
     var showLocationDialog by rememberSaveable { mutableStateOf(false) }
+
+    val animatedLat by animateFloatAsState(
+        targetValue = state.settings.location.latitude.toFloat(),
+        animationSpec = motionScheme.defaultSpatialSpec(),
+        label = "AnimatedLat"
+    )
+    val animatedLon by animateFloatAsState(
+        targetValue = state.settings.location.longitude.toFloat(),
+        animationSpec = motionScheme.defaultSpatialSpec(),
+        label = "AnimatedLon"
+    )
+    val animatedAlt by animateFloatAsState(
+        targetValue = state.solarPosition.altitudeDegrees.toFloat(),
+        animationSpec = motionScheme.defaultSpatialSpec(),
+        label = "AnimatedAlt"
+    )
+    val animatedAz by animateFloatAsState(
+        targetValue = state.solarPosition.azimuthDegrees.toFloat(),
+        animationSpec = motionScheme.defaultSpatialSpec(),
+        label = "AnimatedAz"
+    )
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.detectCoarseLocation(context)
+        }
+    }
+
+    val requestCoarseLocation: () -> Unit = {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            viewModel.detectCoarseLocation(context)
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
@@ -78,7 +138,7 @@ fun SettingsScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         item {
@@ -112,26 +172,18 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(ExpressiveGroupShapes.forIndex(0, 2))
                         .clickable { showLocationDialog = true }
                 ) {
                     ListItem(
-                        headlineContent = {
-                            Text(
-                                text = String.format(
-                                    Locale.US,
-                                    "Latitude %.4f°, Longitude %.4f°",
-                                    state.settings.location.latitude,
-                                    state.settings.location.longitude
-                                )
-                            )
-                        },
+                        modifier = SettingsCardItemModifier,
                         supportingContent = {
                             Text(
                                 text = String.format(
                                     Locale.US,
                                     "Current sun angle: altitude %.1f°, azimuth %.1f°",
-                                    state.solarPosition.altitudeDegrees,
-                                    state.solarPosition.azimuthDegrees
+                                    animatedAlt,
+                                    animatedAz
                                 )
                             )
                         },
@@ -139,12 +191,109 @@ fun SettingsScreen(
                             Icon(imageVector = ChronoIcons.Location, contentDescription = null)
                         },
                         trailingContent = {
-                            TextButton(onClick = { showLocationDialog = true }) {
-                                Text("Modify")
+                            Text(
+                                text = "Modify",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    ) {
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "Latitude %.4f°, Longitude %.4f°",
+                                animatedLat,
+                                animatedLon
+                            )
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = ExpressiveGroupShapes.forIndex(1, 2),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(ExpressiveGroupShapes.forIndex(1, 2))
+                        .clickable(
+                            enabled = !state.isDetectingLocation,
+                            onClick = requestCoarseLocation
+                        )
+                ) {
+                    ListItem(
+                        modifier = SettingsCardItemModifier,
+                        supportingContent = {
+                            AnimatedContent(
+                                targetState = state.locationMessage
+                                    ?: "Coarse network & Wi-Fi position without GPS battery drain",
+                                transitionSpec = {
+                                    fadeIn(motionScheme.defaultEffectsSpec())
+                                        .togetherWith(fadeOut(motionScheme.fastEffectsSpec()))
+                                },
+                                label = "LocationSupportingText"
+                            ) { message ->
+                                Text(text = message)
+                            }
+                        },
+                        leadingContent = {
+                            AnimatedContent(
+                                targetState = state.isDetectingLocation,
+                                transitionSpec = {
+                                    (fadeIn(motionScheme.defaultEffectsSpec()) +
+                                            scaleIn(initialScale = 0.7f, animationSpec = motionScheme.defaultSpatialSpec()))
+                                        .togetherWith(
+                                            fadeOut(motionScheme.fastEffectsSpec()) +
+                                                    scaleOut(targetScale = 0.7f, animationSpec = motionScheme.fastSpatialSpec())
+                                        )
+                                },
+                                contentAlignment = Alignment.Center,
+                                label = "LocationIconTransition"
+                            ) { isDetecting ->
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isDetecting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = ChronoIcons.Solar,
+                                            contentDescription = null
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        trailingContent = {
+                            AnimatedContent(
+                                targetState = state.isDetectingLocation,
+                                transitionSpec = {
+                                    fadeIn(motionScheme.defaultEffectsSpec())
+                                        .togetherWith(fadeOut(motionScheme.fastEffectsSpec()))
+                                },
+                                label = "LocationButtonText"
+                            ) { isDetecting ->
+                                Text(
+                                    text = if (isDetecting) "Locating..." else "Detect",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (isDetecting) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                    )
+                    ) {
+                        Text("Detect location automatically")
+                    }
                 }
             }
         }
@@ -163,10 +312,11 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(ExpressiveGroupShapes.forIndex(0, 2))
                         .clickable { viewModel.setAutoRotate(!state.settings.autoRotateEnabled) }
                 ) {
                     ListItem(
-                        headlineContent = { Text("Periodic change of sets") },
+                        modifier = SettingsCardItemModifier,
                         supportingContent = {
                             Text("Automatically switch the active pair or .heic package")
                         },
@@ -176,11 +326,13 @@ fun SettingsScreen(
                         trailingContent = {
                             Switch(
                                 checked = state.settings.autoRotateEnabled,
-                                onCheckedChange = viewModel::setAutoRotate
+                                onCheckedChange = null
                             )
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                    )
+                    ) {
+                        Text("Periodic change of sets")
+                    }
                 }
 
                 Surface(
@@ -214,6 +366,17 @@ fun SettingsScreen(
                 }
             }
         }
+
+        item {
+            Text(
+                text = "About project",
+                style = MaterialTheme.typography.titleLarge
+            )
+        }
+
+        item {
+            AboutProjectCard(context = context)
+        }
     }
 
     if (showLocationDialog) {
@@ -227,6 +390,100 @@ fun SettingsScreen(
             }
         )
     }
+}
+
+@Composable
+private fun AboutProjectCard(context: Context) {
+    Column(
+        modifier = Modifier.animateContentSize(),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Surface(
+            shape = ExpressiveGroupShapes.forIndex(0, 2),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            ListItem(
+                modifier = SettingsCardItemModifier,
+                supportingContent = {
+                    Text(
+                        text = "Dynamic wallpaper changer with auto rotation."
+                    )
+                },
+                leadingContent = {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = ChronoIcons.Wallpaper,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                },
+                trailingContent = {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Text(
+                            text = "v1.0",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            ) {
+                Text(
+                    text = "ChronoPaper",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+
+        Surface(
+            shape = ExpressiveGroupShapes.forIndex(1, 2),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ExpressiveGroupShapes.forIndex(1, 2))
+                .clickable { openGitHubRepository(context) }
+        ) {
+            ListItem(
+                modifier = SettingsCardItemModifier,
+                supportingContent = {
+                    Text("Licensed under Apache 2.0")
+                },
+                leadingContent = {
+                    Icon(
+                        imageVector = ChronoIcons.GitHub,
+                        contentDescription = "GitHub",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            ) {
+                Text("Source code")
+            }
+        }
+    }
+}
+
+private fun openGitHubRepository(context: Context) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        "https://github.com/dand104/ChronoPaper".toUri()
+    ).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable
@@ -302,6 +559,7 @@ private fun CoordinateEditorDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
                 OutlinedTextField(
                     value = latText,
                     onValueChange = { latText = it },

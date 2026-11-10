@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
-import org.chronopaper.chronopaper.domain.model.HeicScheduleType
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
@@ -30,50 +29,30 @@ class RotatePlaylistUseCaseTest {
 
     @Test
     fun `rotate returns null when playlist is empty`() = runBlocking {
-        fakeRepository.setMode(WallpaperMode.PLAYLIST)
         val result = rotateUseCase()
         assertNull(result)
     }
 
     @Test
-    fun `rotate cycles through paired sets sequentially and wraps around`() = runBlocking {
+    fun `rotate cycles through manual sets and HEIC packs and wraps around`() = runBlocking {
         fakeRepository.setPairedSets(
             listOf(
                 PairedWallpaperSet("p1", "One", "/l1", "/d1"),
-                PairedWallpaperSet("p2", "Two", "/l2", "/d2"),
-                PairedWallpaperSet("p3", "Three", "/l3", "/d3")
+                PairedWallpaperSet("p2", "Two", "/l2", "/d2")
             )
         )
-        fakeRepository.setMode(WallpaperMode.PLAYLIST)
-        fakeRepository.setActivePair("p1")
+        fakeRepository.setHeicPacks(
+            listOf(
+                DynamicHeicPack("h1", "Solar", WallpaperMode.SOLAR, emptyList())
+            )
+        )
+        fakeRepository.setActivePair("p1", WallpaperMode.THEME)
 
-        val nextId1 = rotateUseCase()
-        assertEquals("p2", nextId1)
-        assertEquals("p2", fakeRepository.settings.value.activePairId)
-
-        val nextId2 = rotateUseCase()
-        assertEquals("p3", nextId2)
-
-        val wrapAroundId = rotateUseCase()
-        assertEquals("p1", wrapAroundId)
-        assertEquals("p1", fakeRepository.settings.value.activePairId)
-    }
-
-    @Test
-    fun `rotate cycles through HEIC packs and switches mode accordingly`() = runBlocking {
-        val solarPack = DynamicHeicPack("h1", "Solar", HeicScheduleType.SOLAR, emptyList(), null, null)
-        val aprPack = DynamicHeicPack("h2", "Appearance", HeicScheduleType.APPEARANCE, emptyList(), null, null)
-
-        fakeRepository.setHeicPacks(listOf(solarPack, aprPack))
-        fakeRepository.setActiveHeicPack("h1", WallpaperMode.APPLE_SOLAR)
-
-        val nextId = rotateUseCase()
-        assertEquals("h2", nextId)
-        assertEquals(WallpaperMode.APPLE_APR, fakeRepository.settings.value.mode)
-
-        val wrapId = rotateUseCase()
-        assertEquals("h1", wrapId)
-        assertEquals(WallpaperMode.APPLE_SOLAR, fakeRepository.settings.value.mode)
+        assertEquals("p2", rotateUseCase())
+        assertEquals("h1", rotateUseCase())
+        assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
+        assertEquals("p1", rotateUseCase())
+        assertEquals(WallpaperMode.THEME, fakeRepository.settings.value.mode)
     }
 
     private class FakeWallpaperRepository : WallpaperRepository {
@@ -86,10 +65,6 @@ class RotatePlaylistUseCaseTest {
         private val _heicPacks = MutableStateFlow<List<DynamicHeicPack>>(emptyList())
         override val heicPacks: StateFlow<List<DynamicHeicPack>> = _heicPacks.asStateFlow()
 
-        fun setMode(mode: WallpaperMode) {
-            _settings.value = _settings.value.copy(mode = mode)
-        }
-
         fun setPairedSets(list: List<PairedWallpaperSet>) {
             _pairedSets.value = list
         }
@@ -98,19 +73,27 @@ class RotatePlaylistUseCaseTest {
             _heicPacks.value = list
         }
 
-        override suspend fun setActivePair(pairId: String) {
-            _settings.value = _settings.value.copy(activePairId = pairId)
+        override suspend fun setActivePair(pairId: String, mode: WallpaperMode?) {
+            _settings.value = _settings.value.copy(
+                activePairId = pairId,
+                activeHeicPackId = null,
+                mode = mode ?: _settings.value.mode
+            )
         }
 
-        override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode) {
-            _settings.value = _settings.value.copy(activeHeicPackId = packId, mode = mode)
+        override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode?) {
+            _settings.value = _settings.value.copy(
+                activeHeicPackId = packId,
+                activePairId = null,
+                mode = mode ?: _settings.value.mode
+            )
         }
 
         override suspend fun setActiveMode(mode: WallpaperMode) {
             _settings.value = _settings.value.copy(mode = mode)
         }
 
-        override suspend fun createPairedSet(title: String, lightUri: Uri, darkUri: Uri, targetWidth: Int, targetHeight: Int, activateImmediately: Boolean) = error("Not needed")
+        override suspend fun createManualSet(title: String, imageUris: List<Uri>, mode: WallpaperMode, targetWidth: Int, targetHeight: Int, activateImmediately: Boolean) = error("Not needed")
         override suspend fun deletePairedSet(pairId: String) {}
         override suspend fun importDynamicHeic(sourceUri: Uri, title: String, targetWidth: Int, targetHeight: Int, activateImmediately: Boolean) = error("Not needed")
         override suspend fun deleteHeicPack(packId: String) {}

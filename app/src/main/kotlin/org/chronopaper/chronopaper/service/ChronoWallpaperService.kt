@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
@@ -85,8 +86,9 @@ class ChronoWallpaperService : WallpaperService() {
         ) {
             super.onSurfaceChanged(holder, format, width, height)
             renderer.onSurfaceChanged(width, height)
-            renderer.draw(holder)
-            hasDrawnInitialFrame = true
+            if (renderer.draw(holder)) {
+                hasDrawnInitialFrame = true
+            }
         }
 
         override fun onComputeColors(): WallpaperColors? {
@@ -96,7 +98,6 @@ class ChronoWallpaperService : WallpaperService() {
         private fun observeWallpaperState() {
             val repository = container.wallpaperRepository
             val resolveUseCase = container.resolveCurrentFrameUseCase
-
             engineScope.launch {
                 combine(
                     repository.settings,
@@ -112,11 +113,12 @@ class ChronoWallpaperService : WallpaperService() {
                         isNightMode = isNight,
                         epochMillis = System.currentTimeMillis()
                     )
-                }.collect { activeState ->
+                }.collectLatest { activeState ->
                     val contentChanged = renderer.updateState(activeState)
                     if (contentChanged || !hasDrawnInitialFrame) {
-                        renderer.draw(surfaceHolder)
-                        hasDrawnInitialFrame = true
+                        if (renderer.draw(surfaceHolder)) {
+                            hasDrawnInitialFrame = true
+                        }
                     }
                     if (contentChanged) {
                         notifyColorsChanged()
@@ -130,7 +132,9 @@ class ChronoWallpaperService : WallpaperService() {
             visibleSolarTickerJob = engineScope.launch {
                 while (isActive) {
                     delay(15.minutes)
-                    if (container.wallpaperRepository.settings.value.mode == WallpaperMode.APPLE_SOLAR) {
+                    val mode = container.wallpaperRepository.settings.value.mode
+
+                    if (mode == WallpaperMode.SOLAR || mode == WallpaperMode.TIME) {
                         container.notifyFrameRefreshRequested()
                     }
                 }
