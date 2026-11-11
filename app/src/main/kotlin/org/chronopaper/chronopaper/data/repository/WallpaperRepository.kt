@@ -11,6 +11,7 @@ import org.chronopaper.chronopaper.data.parser.HeicXmpExtractor
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
@@ -30,7 +31,7 @@ class DefaultWallpaperRepository(
     override suspend fun createManualSet(
         title: String,
         imageUris: List<Uri>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop>,
         targetWidth: Int,
         targetHeight: Int,
         activateImmediately: Boolean
@@ -46,24 +47,21 @@ class DefaultWallpaperRepository(
             targetHeight = targetHeight
         )
         val paths = files.map { it.absolutePath }
-        val resolvedMode = when {
-            paths.size == 1 -> WallpaperMode.THEME
-            paths.size > 2 && mode == WallpaperMode.THEME -> WallpaperMode.SOLAR
-            else -> mode
+        val normalizedCrops = List(paths.size) { idx ->
+            imageCrops.getOrNull(idx) ?: PhotoCrop.DEFAULT
         }
 
         val pairedSet = PairedWallpaperSet(
             id = pairId,
             title = title,
             imagePaths = paths,
-            mode = resolvedMode
+            imageCrops = normalizedCrops
         )
         dataStore.upsertPairedSet(pairedSet)
 
         if (activateImmediately) {
             dataStore.updateSettings { current ->
                 current.copy(
-                    mode = resolvedMode,
                     activePairId = pairId,
                     activeHeicPackId = null
                 )
@@ -76,7 +74,7 @@ class DefaultWallpaperRepository(
         pairId: String,
         title: String,
         sources: List<String>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop>,
         targetWidth: Int,
         targetHeight: Int
     ) {
@@ -110,32 +108,24 @@ class DefaultWallpaperRepository(
             storageManager.deleteSetFiles(removedOldFiles)
         }
 
-        val resolvedMode = when {
-            resolvedPaths.size == 1 -> WallpaperMode.THEME
-            resolvedPaths.size > 2 && mode == WallpaperMode.THEME -> WallpaperMode.SOLAR
-            else -> mode
+        val normalizedCrops = List(resolvedPaths.size) { idx ->
+            imageCrops.getOrNull(idx) ?: PhotoCrop.DEFAULT
         }
 
         val updatedSet = existing.copy(
             title = title.trim().ifEmpty { existing.title },
             imagePaths = resolvedPaths,
-            mode = resolvedMode
+            imageCrops = normalizedCrops
         )
         dataStore.upsertPairedSet(updatedSet)
-
-        if (settings.value.activePairId == pairId) {
-            dataStore.updateSettings { it.copy(mode = resolvedMode) }
-        }
     }
 
     override suspend fun updateHeicPack(
         packId: String,
         title: String,
-        mode: WallpaperMode,
         swapLightDark: Boolean
     ) {
         val existing = heicPacks.value.firstOrNull { it.id == packId } ?: return
-        val resolvedMode = if (mode in existing.allowedModes) mode else existing.mode
         val currentLight = existing.lightDefaultIndex ?: existing.frames.firstOrNull { it.isLightDefault }?.frameIndex ?: 0
         val currentDark = existing.darkDefaultIndex ?: existing.frames.firstOrNull { it.isDarkDefault }?.frameIndex ?: existing.frames.lastIndex.coerceAtLeast(0)
         val newLight = if (swapLightDark) currentDark else currentLight
@@ -153,16 +143,11 @@ class DefaultWallpaperRepository(
 
         val updatedPack = existing.copy(
             title = title.trim().ifEmpty { existing.title },
-            mode = resolvedMode,
             frames = updatedFrames,
             lightDefaultIndex = newLight,
             darkDefaultIndex = newDark
         )
         dataStore.upsertHeicPack(updatedPack)
-
-        if (settings.value.activeHeicPackId == packId) {
-            dataStore.updateSettings { it.copy(mode = resolvedMode) }
-        }
     }
 
     override suspend fun deletePairedSet(pairId: String) {
@@ -177,13 +162,11 @@ class DefaultWallpaperRepository(
                 when {
                     nextPair != null -> current.copy(
                         activePairId = nextPair.id,
-                        activeHeicPackId = null,
-                        mode = nextPair.mode
+                        activeHeicPackId = null
                     )
                     fallbackHeic != null -> current.copy(
                         activePairId = null,
-                        activeHeicPackId = fallbackHeic.id,
-                        mode = fallbackHeic.mode
+                        activeHeicPackId = fallbackHeic.id
                     )
                     else -> current.copy(
                         activePairId = null,
@@ -265,7 +248,6 @@ class DefaultWallpaperRepository(
             val pack = DynamicHeicPack(
                 id = packId,
                 title = title,
-                mode = metadata.mode,
                 frames = frames,
                 lightDefaultIndex = metadata.lightIndex,
                 darkDefaultIndex = metadata.darkIndex
@@ -275,7 +257,6 @@ class DefaultWallpaperRepository(
             if (activateImmediately) {
                 dataStore.updateSettings { current ->
                     current.copy(
-                        mode = metadata.mode,
                         activeHeicPackId = packId,
                         activePairId = null
                     )
@@ -299,13 +280,11 @@ class DefaultWallpaperRepository(
                 when {
                     nextHeic != null -> current.copy(
                         activeHeicPackId = nextHeic.id,
-                        activePairId = null,
-                        mode = nextHeic.mode
+                        activePairId = null
                     )
                     fallbackPair != null -> current.copy(
                         activeHeicPackId = null,
-                        activePairId = fallbackPair.id,
-                        mode = fallbackPair.mode
+                        activePairId = fallbackPair.id
                     )
                     else -> current.copy(
                         activeHeicPackId = null,
@@ -317,53 +296,25 @@ class DefaultWallpaperRepository(
     }
 
     override suspend fun setActiveMode(mode: WallpaperMode) {
-        val current = settings.value
-        val activePair = pairedSets.value.firstOrNull { it.id == current.activePairId }
-        val activeHeic = heicPacks.value.firstOrNull { it.id == current.activeHeicPackId }
-
-        if (activePair != null && mode in activePair.allowedModes) {
-            dataStore.upsertPairedSet(activePair.copy(mode = mode))
-        } else if (activeHeic != null && mode in activeHeic.allowedModes) {
-            dataStore.upsertHeicPack(activeHeic.copy(mode = mode))
-        }
-
         dataStore.updateSettings { it.copy(mode = mode) }
     }
 
-    override suspend fun setActivePair(pairId: String, mode: WallpaperMode?) {
-        val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
-        val resolvedMode = if (mode != null && mode in existing.allowedModes) {
-            mode
-        } else {
-            existing.mode
-        }
-        if (resolvedMode != existing.mode) {
-            dataStore.upsertPairedSet(existing.copy(mode = resolvedMode))
-        }
+    override suspend fun setActivePair(pairId: String) {
+        if (pairedSets.value.none { it.id == pairId }) return
         dataStore.updateSettings { current ->
             current.copy(
                 activePairId = pairId,
-                activeHeicPackId = null,
-                mode = resolvedMode
+                activeHeicPackId = null
             )
         }
     }
 
-    override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode?) {
-        val existing = heicPacks.value.firstOrNull { it.id == packId } ?: return
-        val resolvedMode = if (mode != null && mode in existing.allowedModes) {
-            mode
-        } else {
-            existing.mode
-        }
-        if (resolvedMode != existing.mode) {
-            dataStore.upsertHeicPack(existing.copy(mode = resolvedMode))
-        }
+    override suspend fun setActiveHeicPack(packId: String) {
+        if (heicPacks.value.none { it.id == packId }) return
         dataStore.updateSettings { current ->
             current.copy(
                 activeHeicPackId = packId,
-                activePairId = null,
-                mode = resolvedMode
+                activePairId = null
             )
         }
     }

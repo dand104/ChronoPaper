@@ -10,7 +10,7 @@ val ChronoTypography = Typography(
     displaySmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.ExtraBold,
-        fontSize = 36.sp,
+        fontSize = 28.sp,
         lineHeight = 42.sp,
         letterSpacing = (-0.5).sp
     ),

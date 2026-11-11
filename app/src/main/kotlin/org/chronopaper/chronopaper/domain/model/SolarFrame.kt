@@ -6,5 +6,6 @@ data class SolarFrame(
     val altitude: Double,
     val filePath: String,
     val isLightDefault: Boolean = false,
-    val isDarkDefault: Boolean = false
+    val isDarkDefault: Boolean = false,
+    val crop: PhotoCrop = PhotoCrop.DEFAULT
 )

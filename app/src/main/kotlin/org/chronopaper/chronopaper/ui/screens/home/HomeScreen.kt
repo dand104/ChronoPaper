@@ -50,12 +50,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.chronopaper.chronopaper.domain.model.ActiveWallpaperState
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.service.ChronoWallpaperService
 import org.chronopaper.chronopaper.ui.components.ChronoIcons
 import org.chronopaper.chronopaper.ui.components.LocalWallpaperThumbnail
 import org.chronopaper.chronopaper.ui.theme.ExpressiveActivationBar
-import java.util.Locale
 
 @Composable
 fun HomeScreen(
@@ -85,7 +85,9 @@ fun HomeScreen(
     }
 
     val previewState = if (isPreviewNight) state.activeDarkState else state.activeLightState
-    val previewFilePath = (previewState as? ActiveWallpaperState.StaticBitmap)?.filePath
+    val staticPreview = previewState as? ActiveWallpaperState.StaticBitmap
+    val previewFilePath = staticPreview?.filePath
+    val previewCrop = staticPreview?.crop ?: PhotoCrop.DEFAULT
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -113,6 +115,7 @@ fun HomeScreen(
                 formatLabel = state.activeFormatLabel,
                 mode = state.settings.mode,
                 filePath = previewFilePath,
+                crop = previewCrop,
                 isPreviewNight = isPreviewNight,
                 isServiceActive = isLiveWallpaperActive,
                 hasAnyWallpaper = state.hasAnyWallpaper,
@@ -153,7 +156,6 @@ fun HomeScreen(
 
                     ExpressiveActivationBar(
                         selectedMode = state.settings.mode,
-                        allowedModes = state.allowedModes,
                         onSelectMode = viewModel::selectMode,
                         tall = true
                     )
@@ -267,6 +269,7 @@ private fun HeroPreviewCard(
     formatLabel: String,
     mode: WallpaperMode,
     filePath: String?,
+    crop: PhotoCrop,
     isPreviewNight: Boolean,
     isServiceActive: Boolean,
     hasAnyWallpaper: Boolean,
@@ -291,6 +294,7 @@ private fun HeroPreviewCard(
                     filePath = filePath,
                     contentDescription = title,
                     isNightPlaceholder = isPreviewNight,
+                    crop = crop,
                     maxDimensionPx = 1280,
                     modifier = Modifier.fillMaxSize()
                 )

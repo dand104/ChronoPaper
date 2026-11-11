@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.domain.repository.WallpaperRepository
@@ -34,7 +35,7 @@ class RotatePlaylistUseCaseTest {
     }
 
     @Test
-    fun `rotate cycles through manual sets and HEIC packs and wraps around`() = runBlocking {
+    fun `rotate cycles through manual sets and HEIC packs preserving global mode`() = runBlocking {
         fakeRepository.setPairedSets(
             listOf(
                 PairedWallpaperSet("p1", "One", "/l1", "/d1"),
@@ -43,16 +44,18 @@ class RotatePlaylistUseCaseTest {
         )
         fakeRepository.setHeicPacks(
             listOf(
-                DynamicHeicPack("h1", "Solar", WallpaperMode.SOLAR, emptyList())
+                DynamicHeicPack("h1", "Solar", emptyList())
             )
         )
-        fakeRepository.setActivePair("p1", WallpaperMode.THEME)
+        fakeRepository.setActiveMode(WallpaperMode.SOLAR)
+        fakeRepository.setActivePair("p1")
 
         assertEquals("p2", rotateUseCase())
+        assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
         assertEquals("h1", rotateUseCase())
         assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
         assertEquals("p1", rotateUseCase())
-        assertEquals(WallpaperMode.THEME, fakeRepository.settings.value.mode)
+        assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
     }
 
     private class FakeWallpaperRepository : WallpaperRepository {
@@ -73,19 +76,17 @@ class RotatePlaylistUseCaseTest {
             _heicPacks.value = list
         }
 
-        override suspend fun setActivePair(pairId: String, mode: WallpaperMode?) {
+        override suspend fun setActivePair(pairId: String) {
             _settings.value = _settings.value.copy(
                 activePairId = pairId,
-                activeHeicPackId = null,
-                mode = mode ?: _settings.value.mode
+                activeHeicPackId = null
             )
         }
 
-        override suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode?) {
+        override suspend fun setActiveHeicPack(packId: String) {
             _settings.value = _settings.value.copy(
                 activeHeicPackId = packId,
-                activePairId = null,
-                mode = mode ?: _settings.value.mode
+                activePairId = null
             )
         }
 
@@ -93,9 +94,24 @@ class RotatePlaylistUseCaseTest {
             _settings.value = _settings.value.copy(mode = mode)
         }
 
-        override suspend fun createManualSet(title: String, imageUris: List<Uri>, mode: WallpaperMode, targetWidth: Int, targetHeight: Int, activateImmediately: Boolean) = error("Not needed")
+        override suspend fun createManualSet(
+            title: String,
+            imageUris: List<Uri>,
+            imageCrops: List<PhotoCrop>,
+            targetWidth: Int,
+            targetHeight: Int,
+            activateImmediately: Boolean
+        ): PairedWallpaperSet = error("Not needed")
+
         override suspend fun deletePairedSet(pairId: String) {}
-        override suspend fun importDynamicHeic(sourceUri: Uri, title: String, targetWidth: Int, targetHeight: Int, activateImmediately: Boolean) = error("Not needed")
+        override suspend fun importDynamicHeic(
+            sourceUri: Uri,
+            title: String,
+            targetWidth: Int,
+            targetHeight: Int,
+            activateImmediately: Boolean
+        ): DynamicHeicPack = error("Not needed")
+
         override suspend fun deleteHeicPack(packId: String) {}
         override suspend fun setAutoRotateEnabled(enabled: Boolean) {}
         override suspend fun updateLocation(location: GeoCoordinate) {}

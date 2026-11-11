@@ -20,6 +20,7 @@ import org.chronopaper.chronopaper.domain.astronomy.SolarPosition
 import org.chronopaper.chronopaper.domain.astronomy.SunCalc
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 
@@ -105,16 +106,16 @@ class PairedSetsViewModel(
         initialValue = PairedSetsUiState()
     )
 
-    fun activatePair(pairId: String, mode: WallpaperMode? = null) {
+    fun activatePair(pairId: String) {
         viewModelScope.launch {
-            repository.setActivePair(pairId, mode)
+            repository.setActivePair(pairId)
             container.notifyFrameRefreshRequested()
         }
     }
 
-    fun activateHeicPack(packId: String, mode: WallpaperMode? = null) {
+    fun activateHeicPack(packId: String) {
         viewModelScope.launch {
-            repository.setActiveHeicPack(packId, mode)
+            repository.setActiveHeicPack(packId)
             container.notifyFrameRefreshRequested()
         }
     }
@@ -129,7 +130,7 @@ class PairedSetsViewModel(
     fun createManualSet(
         title: String,
         imageUris: List<Uri>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop>,
         targetWidth: Int,
         targetHeight: Int,
         onComplete: () -> Unit
@@ -145,7 +146,7 @@ class PairedSetsViewModel(
                 repository.createManualSet(
                     title = cleanTitle,
                     imageUris = imageUris,
-                    mode = mode,
+                    imageCrops = imageCrops,
                     targetWidth = targetWidth,
                     targetHeight = targetHeight,
                     activateImmediately = true
@@ -168,7 +169,7 @@ class PairedSetsViewModel(
         pairId: String,
         title: String,
         sources: List<String>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop>,
         targetWidth: Int,
         targetHeight: Int,
         onComplete: () -> Unit
@@ -182,7 +183,7 @@ class PairedSetsViewModel(
                     pairId = pairId,
                     title = title,
                     sources = sources,
-                    mode = mode,
+                    imageCrops = imageCrops,
                     targetWidth = targetWidth,
                     targetHeight = targetHeight
                 )
@@ -203,7 +204,6 @@ class PairedSetsViewModel(
     fun updateHeicPack(
         packId: String,
         title: String,
-        mode: WallpaperMode,
         swapLightDark: Boolean,
         onComplete: () -> Unit
     ) {
@@ -211,7 +211,6 @@ class PairedSetsViewModel(
             repository.updateHeicPack(
                 packId = packId,
                 title = title,
-                mode = mode,
                 swapLightDark = swapLightDark
             )
             container.notifyFrameRefreshRequested()

@@ -7,7 +7,7 @@ data class PairedWallpaperSet(
     val id: String,
     val title: String,
     val imagePaths: List<String>,
-    val mode: WallpaperMode = if (imagePaths.size > 2) WallpaperMode.SOLAR else WallpaperMode.THEME,
+    val imageCrops: List<PhotoCrop> = emptyList(),
     val createdAtEpochMillis: Long = System.currentTimeMillis()
 ) {
     constructor(
@@ -23,21 +23,14 @@ data class PairedWallpaperSet(
             lightPath.takeIf { it.isNotBlank() },
             darkPath.takeIf { it.isNotBlank() }
         ).distinct().ifEmpty { listOf(lightPath) },
-        mode = WallpaperMode.THEME,
         createdAtEpochMillis = createdAtEpochMillis
     )
 
     val frameCount: Int
         get() = imagePaths.size
 
-    val allowedModes: List<WallpaperMode>
-        get() = buildList {
-            if (frameCount in 1..2) add(WallpaperMode.THEME)
-            if (frameCount >= 2) {
-                add(WallpaperMode.SOLAR)
-                add(WallpaperMode.TIME)
-            }
-        }.ifEmpty { listOf(WallpaperMode.THEME) }
+    fun cropForIndex(index: Int): PhotoCrop =
+        imageCrops.getOrNull(index) ?: PhotoCrop.DEFAULT
 
     val solarFrames: List<SolarFrame> by lazy {
         when (imagePaths.size) {
@@ -49,7 +42,8 @@ data class PairedWallpaperSet(
                     altitude = 45.0,
                     filePath = imagePaths[0],
                     isLightDefault = true,
-                    isDarkDefault = true
+                    isDarkDefault = true,
+                    crop = cropForIndex(0)
                 )
             )
 
@@ -60,7 +54,8 @@ data class PairedWallpaperSet(
                     altitude = 45.0,
                     filePath = imagePaths[0],
                     isLightDefault = true,
-                    isDarkDefault = false
+                    isDarkDefault = false,
+                    crop = cropForIndex(0)
                 ),
                 SolarFrame(
                     frameIndex = 1,
@@ -68,7 +63,8 @@ data class PairedWallpaperSet(
                     altitude = -45.0,
                     filePath = imagePaths[1],
                     isLightDefault = false,
-                    isDarkDefault = true
+                    isDarkDefault = true,
+                    crop = cropForIndex(1)
                 )
             )
 
@@ -80,10 +76,12 @@ data class PairedWallpaperSet(
                     altitude = -cos(progress * 2.0 * PI) * 60.0,
                     filePath = path,
                     isLightDefault = index == imagePaths.size / 2,
-                    isDarkDefault = index == 0
+                    isDarkDefault = index == 0,
+                    crop = cropForIndex(index)
                 )
             }
         }
     }
+
     fun toSolarFrames(): List<SolarFrame> = solarFrames
 }

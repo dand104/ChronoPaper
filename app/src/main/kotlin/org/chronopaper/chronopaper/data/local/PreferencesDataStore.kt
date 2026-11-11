@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
@@ -140,14 +141,26 @@ class PreferencesDataStore(
                     val obj = pairsArray.getJSONObject(i)
                     val pathsJson = obj.getJSONArray("imagePaths")
                     val imagePaths = List(pathsJson.length()) { j -> pathsJson.getString(j) }
-                    val defaultMode = if (imagePaths.size > 2) WallpaperMode.SOLAR else WallpaperMode.THEME
+                    val cropsJson = obj.optJSONArray("imageCrops")
+                    val imageCrops = List(imagePaths.size) { j ->
+                        val cObj = cropsJson?.optJSONObject(j)
+                        if (cObj != null) {
+                            PhotoCrop(
+                                zoom = cObj.optDouble("zoom", 1.0).toFloat(),
+                                panX = cObj.optDouble("panX", 0.0).toFloat(),
+                                panY = cObj.optDouble("panY", 0.0).toFloat()
+                            )
+                        } else {
+                            PhotoCrop.DEFAULT
+                        }
+                    }
 
                     add(
                         PairedWallpaperSet(
                             id = obj.getString("id"),
                             title = obj.getString("title"),
                             imagePaths = imagePaths,
-                            mode = WallpaperMode.fromNameOrDefault(obj.optString("mode", defaultMode.name)),
+                            imageCrops = imageCrops,
                             createdAtEpochMillis = obj.optLong("createdAt", 0L)
                         )
                     )
@@ -179,7 +192,6 @@ class PreferencesDataStore(
                         DynamicHeicPack(
                             id = obj.getString("id"),
                             title = obj.getString("title"),
-                            mode = WallpaperMode.fromNameOrDefault(obj.optString("mode", WallpaperMode.SOLAR.name)),
                             frames = frames,
                             lightDefaultIndex = if (obj.has("lightDefaultIndex")) {
                                 obj.getInt("lightDefaultIndex")
@@ -210,12 +222,22 @@ class PreferencesDataStore(
         for (pair in pairs) {
             val pathsArray = JSONArray()
             pair.imagePaths.forEach { pathsArray.put(it) }
+            val cropsArray = JSONArray()
+            for (idx in pair.imagePaths.indices) {
+                val crop = pair.cropForIndex(idx)
+                cropsArray.put(
+                    JSONObject()
+                        .put("zoom", crop.sanitizedZoom.toDouble())
+                        .put("panX", crop.sanitizedPanX.toDouble())
+                        .put("panY", crop.sanitizedPanY.toDouble())
+                )
+            }
             pairsArray.put(
                 JSONObject()
                     .put("id", pair.id)
                     .put("title", pair.title)
                     .put("imagePaths", pathsArray)
-                    .put("mode", pair.mode.name)
+                    .put("imageCrops", cropsArray)
                     .put("createdAt", pair.createdAtEpochMillis)
             )
         }
@@ -238,7 +260,6 @@ class PreferencesDataStore(
             val packObj = JSONObject()
                 .put("id", pack.id)
                 .put("title", pack.title)
-                .put("mode", pack.mode.name)
                 .put("frames", framesArray)
                 .put("createdAt", pack.createdAtEpochMillis)
             pack.lightDefaultIndex?.let { packObj.put("lightDefaultIndex", it) }

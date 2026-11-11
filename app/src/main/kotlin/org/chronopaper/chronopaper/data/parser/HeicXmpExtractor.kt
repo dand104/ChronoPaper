@@ -2,7 +2,6 @@ package org.chronopaper.chronopaper.data.parser
 
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
-import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import kotlin.math.PI
@@ -55,14 +54,12 @@ object HeicXmpExtractor {
         val count = frameCount.coerceAtLeast(1)
         return when (count) {
             1 -> HeicAppleMetadata(
-                mode = WallpaperMode.THEME,
                 solarEntries = emptyList(),
                 lightIndex = 0,
                 darkIndex = 0
             )
 
             2 -> HeicAppleMetadata(
-                mode = WallpaperMode.THEME,
                 solarEntries = emptyList(),
                 lightIndex = 0,
                 darkIndex = 1
@@ -78,7 +75,6 @@ object HeicXmpExtractor {
                     )
                 }
                 HeicAppleMetadata(
-                    mode = WallpaperMode.SOLAR,
                     solarEntries = entries,
                     lightIndex = entries.maxByOrNull { it.altitude }?.frameIndex ?: (count / 2),
                     darkIndex = entries.minByOrNull { it.altitude }?.frameIndex ?: 0

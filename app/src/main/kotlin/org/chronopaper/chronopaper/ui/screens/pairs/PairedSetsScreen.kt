@@ -8,18 +8,22 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,12 +44,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSliderState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,21 +63,29 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.chronopaper.chronopaper.domain.astronomy.SolarPosition
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.ui.components.ChronoIcons
+import org.chronopaper.chronopaper.ui.components.CroppedBitmapCanvas
 import org.chronopaper.chronopaper.ui.components.LocalWallpaperThumbnail
+import org.chronopaper.chronopaper.ui.components.rememberLocalImageBitmap
 import org.chronopaper.chronopaper.ui.components.rememberUriImageBitmap
-import org.chronopaper.chronopaper.ui.theme.ExpressiveActivationBar
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Composable
 fun PairedSetsScreen(
@@ -79,9 +94,9 @@ fun PairedSetsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var showCreateSheet by rememberSaveable { mutableStateOf(false) }
-    var editingManualSetId by rememberSaveable { mutableStateOf<String?>(null) }
-    var editingHeicPackId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showCreateSheet: Boolean by rememberSaveable { mutableStateOf(false) }
+    var editingManualSetId: String? by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingHeicPackId: String? by rememberSaveable { mutableStateOf<String?>(null) }
 
     val heicLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -217,9 +232,8 @@ fun PairedSetsScreen(
                     ManualSetCard(
                         set = set,
                         isSelected = isSelected,
-                        activeMode = if (isSelected) state.activeMode else set.mode,
                         closestFrameIndex = if (isSelected) state.closestFrameIndex else null,
-                        onSelect = { mode -> viewModel.activatePair(set.id, mode) },
+                        onSelect = { viewModel.activatePair(set.id) },
                         onEdit = { editingManualSetId = set.id }
                     )
                 }
@@ -232,9 +246,8 @@ fun PairedSetsScreen(
                     HeicContainerCard(
                         pack = pack,
                         isSelected = isSelected,
-                        activeMode = if (isSelected) state.activeMode else pack.mode,
                         closeFrameIndex = if (isSelected) state.closestFrameIndex else null,
-                        onSelect = { mode -> viewModel.activateHeicPack(pack.id, mode) },
+                        onSelect = { viewModel.activateHeicPack(pack.id) },
                         onEdit = { editingHeicPackId = pack.id }
                     )
                 }
@@ -247,12 +260,13 @@ fun PairedSetsScreen(
         CreateManualSetBottomSheet(
             editingSet = null,
             isSaving = state.isSaving,
+            activeMode = state.activeMode,
             onDismiss = { showCreateSheet = false },
-            onConfirm = { title, sources, mode ->
+            onConfirm = { title, sources, crops ->
                 viewModel.createManualSet(
                     title = title,
                     imageUris = sources.map(Uri::parse),
-                    mode = mode,
+                    imageCrops = crops,
                     targetWidth = metrics.widthPixels,
                     targetHeight = metrics.heightPixels,
                     onComplete = { showCreateSheet = false }
@@ -268,13 +282,14 @@ fun PairedSetsScreen(
         CreateManualSetBottomSheet(
             editingSet = editingSet,
             isSaving = state.isSaving,
+            activeMode = state.activeMode,
             onDismiss = { editingManualSetId = null },
-            onConfirm = { title, sources, mode ->
+            onConfirm = { title, sources, crops ->
                 viewModel.updateManualSet(
                     pairId = editingSet.id,
                     title = title,
                     sources = sources,
-                    mode = mode,
+                    imageCrops = crops,
                     targetWidth = metrics.widthPixels,
                     targetHeight = metrics.heightPixels,
                     onComplete = { editingManualSetId = null }
@@ -292,11 +307,10 @@ fun PairedSetsScreen(
         EditHeicPackBottomSheet(
             pack = editingHeic,
             onDismiss = { editingHeicPackId = null },
-            onSave = { title, mode, swapped ->
+            onSave = { title, swapped ->
                 viewModel.updateHeicPack(
                     packId = editingHeic.id,
                     title = title,
-                    mode = mode,
                     swapLightDark = swapped,
                     onComplete = { editingHeicPackId = null }
                 )
@@ -313,9 +327,8 @@ fun PairedSetsScreen(
 private fun ManualSetCard(
     set: PairedWallpaperSet,
     isSelected: Boolean,
-    activeMode: WallpaperMode,
     closestFrameIndex: Int?,
-    onSelect: (WallpaperMode?) -> Unit,
+    onSelect: () -> Unit,
     onEdit: () -> Unit
 ) {
     val cornerRadius by animateDpAsState(
@@ -334,7 +347,7 @@ private fun ManualSetCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(cornerRadius))
-            .clickable { onSelect(null) }
+            .clickable(onClick = onSelect)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -345,12 +358,6 @@ private fun ManualSetCard(
                 subtitle = "Set · ${set.frameCount} photo(s)",
                 isSelected = isSelected,
                 onEdit = onEdit
-            )
-
-            ExpressiveActivationBar(
-                selectedMode = activeMode,
-                allowedModes = set.allowedModes,
-                onSelectMode = { mode -> onSelect(mode) }
             )
 
             if (set.imagePaths.size <= 2) {
@@ -372,6 +379,7 @@ private fun ManualSetCard(
                                 filePath = path,
                                 contentDescription = "${set.title} #${idx + 1}",
                                 isNightPlaceholder = isNightTile,
+                                crop = set.cropForIndex(idx),
                                 modifier = Modifier.fillMaxSize()
                             )
                             Surface(
@@ -431,9 +439,8 @@ private fun ManualSetCard(
 private fun HeicContainerCard(
     pack: DynamicHeicPack,
     isSelected: Boolean,
-    activeMode: WallpaperMode,
     closeFrameIndex: Int?,
-    onSelect: (WallpaperMode?) -> Unit,
+    onSelect: () -> Unit,
     onEdit: () -> Unit
 ) {
     val cornerRadius by animateDpAsState(
@@ -452,7 +459,7 @@ private fun HeicContainerCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(cornerRadius))
-            .clickable { onSelect(null) }
+            .clickable(onClick = onSelect)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -463,11 +470,6 @@ private fun HeicContainerCard(
                 subtitle = "Set · ${pack.frameCount} frames",
                 isSelected = isSelected,
                 onEdit = onEdit
-            )
-            ExpressiveActivationBar(
-                selectedMode = activeMode,
-                allowedModes = pack.allowedModes,
-                onSelectMode = { mode -> onSelect(mode) }
             )
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -580,6 +582,7 @@ private fun SolarFramePreviewTile(
                     filePath = frame.filePath,
                     contentDescription = "Frame #${frame.frameIndex}",
                     isNightPlaceholder = frame.altitude < 0,
+                    crop = frame.crop,
                     maxDimensionPx = 400,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -775,31 +778,35 @@ private fun EmptyCollectionsCard() {
 private fun CreateManualSetBottomSheet(
     editingSet: PairedWallpaperSet?,
     isSaving: Boolean,
+    activeMode: WallpaperMode,
     onDismiss: () -> Unit,
-    onConfirm: (title: String, sources: List<String>, mode: WallpaperMode) -> Unit,
+    onConfirm: (title: String, sources: List<String>, crops: List<PhotoCrop>) -> Unit,
     onDelete: (() -> Unit)?
 ) {
-    var title by rememberSaveable(editingSet?.id) {
+    var title: String by rememberSaveable(editingSet?.id) {
         mutableStateOf(editingSet?.title.orEmpty())
     }
-    var uriStrings by rememberSaveable(editingSet?.id) {
+    var uriStrings: List<String> by rememberSaveable(editingSet?.id) {
         mutableStateOf(editingSet?.imagePaths ?: emptyList())
     }
-    var selectedModeName by rememberSaveable(editingSet?.id) {
-        mutableStateOf((editingSet?.mode ?: WallpaperMode.THEME).name)
+    var cropStrings: List<String> by rememberSaveable(editingSet?.id) {
+        val initial: List<String> = editingSet?.let { set ->
+            List(set.imagePaths.size) { idx -> set.cropForIndex(idx).serialize() }
+        } ?: emptyList()
+        mutableStateOf(initial)
+    }
+    var editingPhotoIndex: Int? by rememberSaveable(editingSet?.id) {
+        mutableStateOf<Int?>(null)
     }
 
     val photoCount = uriStrings.size
-
-    val allowedModes = rememberAllowedModesForCount(photoCount)
-    val effectiveMode = WallpaperMode.fromNameOrDefault(selectedModeName)
-        .let { if (it in allowedModes) it else allowedModes.first() }
 
     val pickSingleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             uriStrings = uriStrings + uri.toString()
+            cropStrings = cropStrings + PhotoCrop.DEFAULT.serialize()
         }
     }
 
@@ -808,6 +815,7 @@ private fun CreateManualSetBottomSheet(
     ) { uris ->
         if (uris.isNotEmpty()) {
             uriStrings = uriStrings + uris.map { it.toString() }
+            cropStrings = cropStrings + List(uris.size) { PhotoCrop.DEFAULT.serialize() }
         }
     }
 
@@ -899,13 +907,19 @@ private fun CreateManualSetBottomSheet(
                     contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
                     itemsIndexed(uriStrings) { idx, source ->
+                        val currentCrop = PhotoCrop.deserialize(cropStrings.getOrNull(idx))
                         SourcePreviewChip(
                             index = idx,
                             total = photoCount,
                             source = source,
-                            mode = effectiveMode,
+                            crop = currentCrop,
+                            mode = activeMode,
+                            onEditCrop = { editingPhotoIndex = idx },
                             onRemove = {
                                 uriStrings = uriStrings.toMutableList().also { it.removeAt(idx) }
+                                cropStrings = cropStrings.toMutableList().also {
+                                    if (idx in it.indices) it.removeAt(idx)
+                                }
                             }
                         )
                     }
@@ -934,34 +948,32 @@ private fun CreateManualSetBottomSheet(
                 }
             }
 
-            if (photoCount >= 1) {
-                ExpressiveActivationBar(
-                    selectedMode = effectiveMode,
-                    allowedModes = allowedModes,
-                    onSelectMode = { mode -> selectedModeName = mode.name }
-                )
-
-                if (effectiveMode == WallpaperMode.THEME && photoCount == 2) {
-                    FilledTonalButton(
-                        onClick = { uriStrings = uriStrings.reversed() },
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = ChronoIcons.Swap,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Swap photos")
-                    }
+            if (photoCount == 2) {
+                FilledTonalButton(
+                    onClick = {
+                        uriStrings = uriStrings.reversed()
+                        cropStrings = cropStrings.reversed()
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = ChronoIcons.Swap,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Swap photos")
                 }
             }
 
             Button(
                 onClick = {
                     if (uriStrings.isNotEmpty()) {
-                        onConfirm(title, uriStrings, effectiveMode)
+                        val parsedCrops = List(uriStrings.size) { idx ->
+                            PhotoCrop.deserialize(cropStrings.getOrNull(idx))
+                        }
+                        onConfirm(title, uriStrings, parsedCrops)
                     }
                 },
                 enabled = !isSaving && uriStrings.isNotEmpty(),
@@ -989,21 +1001,44 @@ private fun CreateManualSetBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+
+    val activeCropIndex = editingPhotoIndex
+    if (activeCropIndex != null && activeCropIndex in uriStrings.indices) {
+        val targetSource = uriStrings[activeCropIndex]
+        val initialCrop = PhotoCrop.deserialize(cropStrings.getOrNull(activeCropIndex))
+        PhotoCropEditorDialog(
+            photoIndex = activeCropIndex,
+            totalPhotos = photoCount,
+            source = targetSource,
+            initialCrop = initialCrop,
+            onDismiss = { editingPhotoIndex = null },
+            onApplySingle = { updatedCrop ->
+                val mutable = cropStrings.toMutableList()
+                while (mutable.size < uriStrings.size) {
+                    mutable.add(PhotoCrop.DEFAULT.serialize())
+                }
+                mutable[activeCropIndex] = updatedCrop.serialize()
+                cropStrings = mutable
+                editingPhotoIndex = null
+            },
+            onApplyAll = { updatedCrop ->
+                val serialized = updatedCrop.serialize()
+                cropStrings = List(uriStrings.size) { serialized }
+                editingPhotoIndex = null
+            }
+        )
+    }
 }
 
 @Composable
 private fun EditHeicPackBottomSheet(
     pack: DynamicHeicPack,
     onDismiss: () -> Unit,
-    onSave: (title: String, mode: WallpaperMode, swapLightDark: Boolean) -> Unit,
+    onSave: (title: String, swapLightDark: Boolean) -> Unit,
     onDelete: () -> Unit
 ) {
-    var title by rememberSaveable(pack.id) { mutableStateOf(pack.title) }
-    var selectedModeName by rememberSaveable(pack.id) { mutableStateOf(pack.mode.name) }
-    var swappedLightDark by rememberSaveable(pack.id) { mutableStateOf(false) }
-
-    val effectiveMode = WallpaperMode.fromNameOrDefault(selectedModeName)
-        .let { if (it in pack.allowedModes) it else pack.allowedModes.first() }
+    var title: String by rememberSaveable(pack.id) { mutableStateOf(pack.title) }
+    var swappedLightDark: Boolean by rememberSaveable(pack.id) { mutableStateOf(false) }
 
     val baseLightIdx = pack.lightDefaultIndex
         ?: pack.frames.firstOrNull { it.isLightDefault }?.frameIndex
@@ -1064,13 +1099,7 @@ private fun EditHeicPackBottomSheet(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            ExpressiveActivationBar(
-                selectedMode = effectiveMode,
-                allowedModes = pack.allowedModes,
-                onSelectMode = { mode -> selectedModeName = mode.name }
-            )
-
-            if (effectiveMode == WallpaperMode.THEME && lightFrame != null && darkFrame != null && pack.frameCount >= 2) {
+            if (lightFrame != null && darkFrame != null && pack.frameCount >= 2) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1146,7 +1175,7 @@ private fun EditHeicPackBottomSheet(
             }
 
             Button(
-                onClick = { onSave(title, effectiveMode, swappedLightDark) },
+                onClick = { onSave(title, swappedLightDark) },
                 shape = RoundedCornerShape(24.dp),
                 contentPadding = PaddingValues(vertical = 16.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -1158,26 +1187,20 @@ private fun EditHeicPackBottomSheet(
     }
 }
 
-private fun rememberAllowedModesForCount(count: Int): List<WallpaperMode> = buildList {
-    if (count <= 2) add(WallpaperMode.THEME)
-    if (count >= 2) {
-        add(WallpaperMode.SOLAR)
-        add(WallpaperMode.TIME)
-    }
-}.ifEmpty { listOf(WallpaperMode.THEME) }
-
 @Composable
 private fun SourcePreviewChip(
     index: Int,
     total: Int,
     source: String,
+    crop: PhotoCrop,
     mode: WallpaperMode,
+    onEditCrop: () -> Unit,
     onRemove: () -> Unit
 ) {
     val isLocalFile = !source.startsWith("content://")
     val badgeText = when {
         total == 1 -> "Light & Dark"
-        mode == WallpaperMode.THEME -> if (index == 0) "Light" else "Dark"
+        mode == WallpaperMode.THEME && total == 2 -> if (index == 0) "Light" else "Dark"
         mode == WallpaperMode.TIME -> {
             val hour = ((index.toDouble() / total.toDouble()) * 24.0).toInt() % 24
             String.format(Locale.US, "%02d:00", hour)
@@ -1191,22 +1214,24 @@ private fun SourcePreviewChip(
         modifier = Modifier
             .width(128.dp)
             .height(148.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onEditCrop)
     ) {
         Box {
             if (isLocalFile) {
                 LocalWallpaperThumbnail(
                     filePath = source,
                     contentDescription = badgeText,
+                    crop = crop,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
                 val bitmap by rememberUriImageBitmap(Uri.parse(source))
                 val currentBitmap = bitmap
                 if (currentBitmap != null) {
-                    Image(
+                    CroppedBitmapCanvas(
                         bitmap = currentBitmap,
-                        contentDescription = badgeText,
-                        contentScale = ContentScale.Crop,
+                        crop = crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -1224,6 +1249,31 @@ private fun SourcePreviewChip(
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
+            }
+            Surface(
+                shape = CircleShape,
+                color = if (crop.isDefault) {
+                    Color.Black.copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                contentColor = if (crop.isDefault) {
+                    Color.White
+                } else {
+                    MaterialTheme.colorScheme.onPrimary
+                },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(26.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = ChronoIcons.Edit,
+                        contentDescription = "Adjust framing",
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
             Surface(
                 shape = CircleShape,
@@ -1248,9 +1298,266 @@ private fun SourcePreviewChip(
     }
 }
 
+@Composable
+private fun PhotoCropEditorDialog(
+    photoIndex: Int,
+    totalPhotos: Int,
+    source: String,
+    initialCrop: PhotoCrop,
+    onDismiss: () -> Unit,
+    onApplySingle: (PhotoCrop) -> Unit,
+    onApplyAll: (PhotoCrop) -> Unit
+) {
+    val context = LocalContext.current
+    val metrics = context.resources.displayMetrics
+    val screenAspect = (metrics.widthPixels.toFloat() / metrics.heightPixels.toFloat().coerceAtLeast(1f))
+        .coerceIn(0.35f, 2.5f)
+
+    val isLocalFile = !source.startsWith("content://")
+    val localBitmap by rememberLocalImageBitmap(
+        filePath = if (isLocalFile) source else null,
+        maxDimensionPx = 1600
+    )
+    val uriBitmap by rememberUriImageBitmap(
+        uri = if (!isLocalFile) Uri.parse(source) else null,
+        maxDimensionPx = 1600
+    )
+    val bitmap = if (isLocalFile) localBitmap else uriBitmap
+
+    val zoomState = rememberSliderState(
+        value = initialCrop.sanitizedZoom,
+        trackRange = PhotoCrop.MIN_ZOOM..PhotoCrop.MAX_ZOOM
+    )
+    val panXState = rememberSliderState(
+        value = initialCrop.sanitizedPanX,
+        trackRange = -1f..1f
+    )
+    val panYState = rememberSliderState(
+        value = initialCrop.sanitizedPanY,
+        trackRange = -1f..1f
+    )
+    var viewportSize: IntSize by remember {
+        mutableStateOf(IntSize.Zero)
+    }
+
+    val currentCrop = PhotoCrop(
+        zoom = zoomState.value,
+        panX = panXState.value,
+        panY = panYState.value
+    )
+
+    val bw = (bitmap?.width ?: 0).toFloat()
+    val bh = (bitmap?.height ?: 0).toFloat()
+    val sw = viewportSize.width.toFloat()
+    val sh = viewportSize.height.toFloat()
+
+    val baseScale = if (bw > 0f && bh > 0f && sw > 0f && sh > 0f) {
+        max(sw / bw, sh / bh)
+    } else {
+        1f
+    }
+    val overflowX = if (bw > 0f && sw > 0f) max(0f, bw * baseScale * zoomState.value - sw) else 0f
+    val overflowY = if (bh > 0f && sh > 0f) max(0f, bh * baseScale * zoomState.value - sh) else 0f
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Photo #${photoIndex + 1} framing",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            zoomState.value = 1f
+                            panXState.value = 0f
+                            panYState.value = 0f
+                        }
+                    ) {
+                        Text("Reset")
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(screenAspect)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Color(0xFF141824))
+                            .border(
+                                width = 1.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(22.dp)
+                            )
+                            .onSizeChanged { viewportSize = it }
+                            .pointerInput(bw, bh, viewportSize) {
+                                detectTransformGestures { _, pan, zoomChange, _ ->
+                                    if (bw <= 0f || bh <= 0f || viewportSize.width <= 0 || viewportSize.height <= 0) {
+                                        return@detectTransformGestures
+                                    }
+                                    val vw = viewportSize.width.toFloat()
+                                    val vh = viewportSize.height.toFloat()
+                                    val bScale = max(vw / bw, vh / bh)
+                                    val newZoom = (zoomState.value * zoomChange).coerceIn(
+                                        PhotoCrop.MIN_ZOOM,
+                                        PhotoCrop.MAX_ZOOM
+                                    )
+                                    val effScale = bScale * newZoom
+                                    val ovX = max(0f, bw * effScale - vw)
+                                    val ovY = max(0f, bh * effScale - vh)
+
+                                    val dPanX = if (ovX > 0.5f) -pan.x / (ovX * 0.5f) else 0f
+                                    val dPanY = if (ovY > 0.5f) -pan.y / (ovY * 0.5f) else 0f
+
+                                    zoomState.value = newZoom
+                                    panXState.value = (panXState.value + dPanX).coerceIn(-1f, 1f)
+                                    panYState.value = (panYState.value + dPanY).coerceIn(-1f, 1f)
+                                }
+                            }
+                    ) {
+                        if (bitmap != null) {
+                            CroppedBitmapCanvas(
+                                bitmap = bitmap,
+                                crop = currentCrop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val gridColor = Color.White.copy(alpha = 0.25f)
+                            val thirdW = size.width / 3f
+                            val thirdH = size.height / 3f
+                            for (i in 1..2) {
+                                drawLine(
+                                    color = gridColor,
+                                    start = Offset(thirdW * i, 0f),
+                                    end = Offset(thirdW * i, size.height),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                drawLine(
+                                    color = gridColor,
+                                    start = Offset(0f, thirdH * i),
+                                    end = Offset(size.width, thirdH * i),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Zoom", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = "${(zoomState.value * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Slider(
+                        state = zoomState,
+                        onValueChange = { zoomState.value = it }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Horizontal position", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = if (overflowX > 1f) "${(panXState.value * 100).roundToInt()}%" else "Centered",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Slider(
+                        state = panXState,
+                        onValueChange = { panXState.value = it },
+                        enabled = overflowX > 1f
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Vertical position", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = if (overflowY > 1f) "${(panYState.value * 100).roundToInt()}%" else "Centered",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Slider(
+                        state = panYState,
+                        onValueChange = { panYState.value = it },
+                        enabled = overflowY > 1f
+                    )
+                }
+
+                if (totalPhotos > 1) {
+                    FilledTonalButton(
+                        onClick = { onApplyAll(currentCrop) },
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Apply to all $totalPhotos photos in set")
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = { onApplySingle(currentCrop) },
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Apply")
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun resolveDisplayName(context: Context, uri: Uri): String? {
     return runCatching {
-
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor ->
                 if (cursor.moveToFirst()) {
@@ -1260,6 +1567,5 @@ private fun resolveDisplayName(context: Context, uri: Uri): String? {
                     null
                 }
             }
-
     }.getOrNull()
 }

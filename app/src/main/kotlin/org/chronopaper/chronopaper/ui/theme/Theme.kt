@@ -30,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -81,7 +80,6 @@ object ExpressiveGroupShapes {
 @Composable
 fun ExpressiveActivationBar(
     selectedMode: WallpaperMode,
-    allowedModes: List<WallpaperMode>,
     onSelectMode: (WallpaperMode) -> Unit,
     modifier: Modifier = Modifier,
     tall: Boolean = false
@@ -106,7 +104,6 @@ fun ExpressiveActivationBar(
         ) {
             items.forEachIndexed { index, (mode, label, icon) ->
                 val isSelected = selectedMode == mode
-                val isEnabled = mode in allowedModes
 
                 val weight by animateFloatAsState(
                     targetValue = if (isSelected) 1.32f else 1f,
@@ -144,8 +141,7 @@ fun ExpressiveActivationBar(
                         .weight(weight)
                         .height(if (tall) 64.dp else 44.dp)
                         .clip(shape)
-                        .alpha(if (isEnabled) 1f else 0.38f)
-                        .clickable(enabled = isEnabled) { onSelectMode(mode) }
+                        .clickable { onSelectMode(mode) }
                 ) {
                     if (tall) {
                         Column(

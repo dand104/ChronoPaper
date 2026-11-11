@@ -12,7 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.chronopaper.chronopaper.data.parser.HeicFrameExtractor
 import org.chronopaper.chronopaper.domain.model.ActiveWallpaperState
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import java.io.File
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 class StaticImageRenderer : WallpaperRenderer {
@@ -26,6 +28,7 @@ class StaticImageRenderer : WallpaperRenderer {
     private var currentColors: WallpaperColors? = null
 
     private var loadedFilePath: String? = null
+    private var currentCrop: PhotoCrop = PhotoCrop.DEFAULT
     private var isNightFallback: Boolean = false
     private var surfaceWidth: Int = 0
     private var surfaceHeight: Int = 0
@@ -48,11 +51,19 @@ class StaticImageRenderer : WallpaperRenderer {
                 val targetH: Int
                 synchronized(renderLock) {
                     isNightFallback = state.isNightMode
-                    if (state.filePath == loadedFilePath && currentBitmap != null) {
+                    val bmp = currentBitmap
+                    if (state.filePath == loadedFilePath && bmp != null && !bmp.isRecycled) {
+                        if (state.crop != currentCrop) {
+                            currentCrop = state.crop
+                            recalculateMatrixLocked(bmp.width, bmp.height)
+                            return true
+                        }
                         return false
                     }
-                    targetW = surfaceWidth
-                    targetH = surfaceHeight
+                    currentCrop = state.crop
+                    val zoomFactor = state.crop.sanitizedZoom
+                    targetW = (surfaceWidth * zoomFactor).roundToInt()
+                    targetH = (surfaceHeight * zoomFactor).roundToInt()
                 }
 
                 val decoded = decodeHardwareBitmapAndColors(state.filePath, targetW, targetH)
@@ -68,7 +79,8 @@ class StaticImageRenderer : WallpaperRenderer {
                     currentBitmap = newBitmap
                     currentColors = newColors
                     loadedFilePath = state.filePath
-                    recalculateCenterCropMatrixLocked(newBitmap.width, newBitmap.height)
+                    currentCrop = state.crop
+                    recalculateMatrixLocked(newBitmap.width, newBitmap.height)
                     oldBitmap?.recycle()
                     true
                 }
@@ -82,7 +94,7 @@ class StaticImageRenderer : WallpaperRenderer {
             surfaceHeight = height
             val bmp = currentBitmap
             if (bmp != null && !bmp.isRecycled) {
-                recalculateCenterCropMatrixLocked(bmp.width, bmp.height)
+                recalculateMatrixLocked(bmp.width, bmp.height)
             }
         }
     }
@@ -95,6 +107,8 @@ class StaticImageRenderer : WallpaperRenderer {
             ?: return false
         try {
             synchronized(renderLock) {
+                val bgColor = if (isNightFallback) DARK_FALLBACK_COLOR else LIGHT_FALLBACK_COLOR
+                canvas.drawColor(bgColor)
                 var bitmap = currentBitmap
 
                 if (bitmap != null && !bitmap.isRecycled) {
@@ -107,9 +121,6 @@ class StaticImageRenderer : WallpaperRenderer {
                         }
                     }
                     canvas.drawBitmap(bitmap, drawMatrix, bitmapPaint)
-                } else {
-                    val bgColor = if (isNightFallback) DARK_FALLBACK_COLOR else LIGHT_FALLBACK_COLOR
-                    canvas.drawColor(bgColor)
                 }
             }
             return true
@@ -137,23 +148,28 @@ class StaticImageRenderer : WallpaperRenderer {
         old?.recycle()
     }
 
-    private fun recalculateCenterCropMatrixLocked(bitmapWidth: Int, bitmapHeight: Int) {
+    private fun recalculateMatrixLocked(bitmapWidth: Int, bitmapHeight: Int) {
         drawMatrix.reset()
         if (bitmapWidth <= 0 || bitmapHeight <= 0 || surfaceWidth <= 0 || surfaceHeight <= 0) {
             return
         }
 
-        val scale: Float
-        var dx = 0f
-        var dy = 0f
+        val bw = bitmapWidth.toFloat()
+        val bh = bitmapHeight.toFloat()
+        val sw = surfaceWidth.toFloat()
+        val sh = surfaceHeight.toFloat()
 
-        if (bitmapWidth * surfaceHeight > surfaceWidth * bitmapHeight) {
-            scale = surfaceHeight.toFloat() / bitmapHeight.toFloat()
-            dx = (surfaceWidth - bitmapWidth * scale) * 0.5f
-        } else {
-            scale = surfaceWidth.toFloat() / bitmapWidth.toFloat()
-            dy = (surfaceHeight - bitmapHeight * scale) * 0.5f
-        }
+        val baseScale = max(sw / bw, sh / bh)
+        val scale = baseScale * currentCrop.sanitizedZoom
+
+        val scaledW = bw * scale
+        val scaledH = bh * scale
+
+        val overflowX = max(0f, scaledW - sw)
+        val overflowY = max(0f, scaledH - sh)
+
+        val dx = (sw - scaledW) * 0.5f - (overflowX * 0.5f * currentCrop.sanitizedPanX)
+        val dy = (sh - scaledH) * 0.5f - (overflowY * 0.5f * currentCrop.sanitizedPanY)
 
         drawMatrix.setScale(scale, scale)
         drawMatrix.postTranslate(dx, dy)

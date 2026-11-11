@@ -4,6 +4,7 @@ import org.chronopaper.chronopaper.domain.model.ActiveWallpaperState
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.SolarFrame
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
@@ -76,7 +77,6 @@ class ResolveCurrentFrameUseCaseTest {
         val pack = DynamicHeicPack(
             id = "heic_1",
             title = "Catalina",
-            mode = WallpaperMode.THEME,
             frames = frames,
             lightDefaultIndex = 0,
             darkDefaultIndex = 1
@@ -98,14 +98,14 @@ class ResolveCurrentFrameUseCaseTest {
         val epochMillis = Instant.parse("2026-03-20T12:00:00Z").toEpochMilli()
         val loc = GeoCoordinate(0.0, 0.0)
 
-        val noonFrame = SolarFrame(frameIndex = 1, azimuth = 180.0, altitude = 89.0, filePath = "/noon.webp")
+        val customCrop = PhotoCrop(zoom = 1.5f, panX = -0.4f, panY = 0.2f)
+        val noonFrame = SolarFrame(frameIndex = 1, azimuth = 180.0, altitude = 89.0, filePath = "/noon.webp", crop = customCrop)
         val sunsetFrame = SolarFrame(frameIndex = 2, azimuth = 270.0, altitude = 5.0, filePath = "/sunset.webp")
         val nightFrame = SolarFrame(frameIndex = 3, azimuth = 0.0, altitude = -60.0, filePath = "/night.webp")
 
         val pack = DynamicHeicPack(
             id = "solar_pack",
             title = "Solar Earth",
-            mode = WallpaperMode.SOLAR,
             frames = listOf(sunsetFrame, noonFrame, nightFrame),
             lightDefaultIndex = 1,
             darkDefaultIndex = 3
@@ -124,6 +124,8 @@ class ResolveCurrentFrameUseCaseTest {
             epochMillis = epochMillis
         )
 
-        assertEquals("/noon.webp", (result as ActiveWallpaperState.StaticBitmap).filePath)
+        val bitmapState = result as ActiveWallpaperState.StaticBitmap
+        assertEquals("/noon.webp", bitmapState.filePath)
+        assertEquals(customCrop, bitmapState.crop)
     }
 }

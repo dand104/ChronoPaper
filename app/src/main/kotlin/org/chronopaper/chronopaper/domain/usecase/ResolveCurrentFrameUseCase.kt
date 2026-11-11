@@ -42,10 +42,8 @@ class ResolveCurrentFrameUseCase {
     ): ActiveWallpaperState = resolveFrames(
         sourceId = pair.id,
         frames = pair.toSolarFrames(),
-        allowedModes = pair.allowedModes,
-        defaultMode = pair.mode,
-        lightDefaultIndex = 0,
-        darkDefaultIndex = (pair.frameCount - 1).coerceAtLeast(0),
+        lightDefaultIndex = null,
+        darkDefaultIndex = null,
         settings = settings,
         isNightMode = isNightMode,
         epochMillis = epochMillis
@@ -59,8 +57,6 @@ class ResolveCurrentFrameUseCase {
     ): ActiveWallpaperState = resolveFrames(
         sourceId = pack.id,
         frames = pack.frames,
-        allowedModes = pack.allowedModes,
-        defaultMode = pack.mode,
         lightDefaultIndex = pack.lightDefaultIndex,
         darkDefaultIndex = pack.darkDefaultIndex,
         settings = settings,
@@ -71,8 +67,6 @@ class ResolveCurrentFrameUseCase {
     private fun resolveFrames(
         sourceId: String,
         frames: List<SolarFrame>,
-        allowedModes: List<WallpaperMode>,
-        defaultMode: WallpaperMode,
         lightDefaultIndex: Int?,
         darkDefaultIndex: Int?,
         settings: UserSettings,
@@ -81,8 +75,7 @@ class ResolveCurrentFrameUseCase {
     ): ActiveWallpaperState {
         if (frames.isEmpty()) return ActiveWallpaperState.Fallback(isNightMode)
 
-        val effectiveMode = if (settings.mode in allowedModes) settings.mode else defaultMode
-        val selectedFrame = when (effectiveMode) {
+        val selectedFrame = when (settings.mode) {
             WallpaperMode.THEME -> selectThemeFrame(frames, lightDefaultIndex, darkDefaultIndex, isNightMode)
             WallpaperMode.SOLAR -> selectSolarFrame(frames, lightDefaultIndex, darkDefaultIndex, settings, isNightMode, epochMillis)
             WallpaperMode.TIME -> selectTimeFrame(frames, epochMillis)
@@ -91,7 +84,8 @@ class ResolveCurrentFrameUseCase {
         return ActiveWallpaperState.StaticBitmap(
             filePath = selectedFrame.filePath,
             isNightMode = isNightMode,
-            mode = effectiveMode,
+            mode = settings.mode,
+            crop = selectedFrame.crop,
             sourceId = sourceId
         )
     }

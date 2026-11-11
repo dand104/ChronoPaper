@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 
@@ -16,7 +17,7 @@ interface WallpaperRepository {
     suspend fun createManualSet(
         title: String,
         imageUris: List<Uri>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop> = emptyList(),
         targetWidth: Int,
         targetHeight: Int,
         activateImmediately: Boolean = true
@@ -26,7 +27,7 @@ interface WallpaperRepository {
         pairId: String,
         title: String,
         sources: List<String>,
-        mode: WallpaperMode,
+        imageCrops: List<PhotoCrop> = emptyList(),
         targetWidth: Int,
         targetHeight: Int
     ) {}
@@ -34,7 +35,6 @@ interface WallpaperRepository {
     suspend fun updateHeicPack(
         packId: String,
         title: String,
-        mode: WallpaperMode,
         swapLightDark: Boolean = false
     ) {}
 
@@ -52,9 +52,9 @@ interface WallpaperRepository {
 
     suspend fun setActiveMode(mode: WallpaperMode)
 
-    suspend fun setActivePair(pairId: String, mode: WallpaperMode? = null)
+    suspend fun setActivePair(pairId: String)
 
-    suspend fun setActiveHeicPack(packId: String, mode: WallpaperMode? = null)
+    suspend fun setActiveHeicPack(packId: String)
 
     suspend fun setAutoRotateEnabled(enabled: Boolean)
 

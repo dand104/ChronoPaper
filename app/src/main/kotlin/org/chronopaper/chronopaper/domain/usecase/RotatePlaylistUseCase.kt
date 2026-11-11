@@ -1,14 +1,13 @@
 package org.chronopaper.chronopaper.domain.usecase
 
-import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.domain.repository.WallpaperRepository
 
 class RotatePlaylistUseCase(
     private val repository: WallpaperRepository
 ) {
     suspend operator fun invoke(): String? {
-        val pairs = repository.pairedSets.value.map { PlaylistEntry.Manual(it.id, it.mode) }
-        val packs = repository.heicPacks.value.map { PlaylistEntry.Heic(it.id, it.mode) }
+        val pairs = repository.pairedSets.value.map { PlaylistEntry.Manual(it.id) }
+        val packs = repository.heicPacks.value.map { PlaylistEntry.Heic(it.id) }
         val allEntries = pairs + packs
         if (allEntries.isEmpty()) return null
 
@@ -18,15 +17,14 @@ class RotatePlaylistUseCase(
         val nextEntry = allEntries[if (currentIndex == -1) 0 else (currentIndex + 1) % allEntries.size]
 
         when (nextEntry) {
-            is PlaylistEntry.Manual -> repository.setActivePair(nextEntry.id, nextEntry.mode)
-            is PlaylistEntry.Heic -> repository.setActiveHeicPack(nextEntry.id, nextEntry.mode)
+            is PlaylistEntry.Manual -> repository.setActivePair(nextEntry.id)
+            is PlaylistEntry.Heic -> repository.setActiveHeicPack(nextEntry.id)
         }
         return nextEntry.id
     }
     private sealed interface PlaylistEntry {
         val id: String
-        val mode: WallpaperMode
-        data class Manual(override val id: String, override val mode: WallpaperMode) : PlaylistEntry
-        data class Heic(override val id: String, override val mode: WallpaperMode) : PlaylistEntry
+        data class Manual(override val id: String) : PlaylistEntry
+        data class Heic(override val id: String) : PlaylistEntry
     }
 }

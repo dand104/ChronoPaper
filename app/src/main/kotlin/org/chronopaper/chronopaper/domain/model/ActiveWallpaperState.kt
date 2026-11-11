@@ -11,6 +11,7 @@ sealed interface ActiveWallpaperState {
         val filePath: String,
         override val isNightMode: Boolean,
         val mode: WallpaperMode,
+        val crop: PhotoCrop = PhotoCrop.DEFAULT,
         val sourceId: String
     ) : ActiveWallpaperState
 }

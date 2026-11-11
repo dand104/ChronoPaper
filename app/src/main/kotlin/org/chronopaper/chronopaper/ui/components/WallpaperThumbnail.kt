@@ -3,9 +3,10 @@ package org.chronopaper.chronopaper.ui.components
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.util.LruCache
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -14,15 +15,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.chronopaper.chronopaper.domain.model.PhotoCrop
 import java.io.File
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -98,29 +103,63 @@ fun rememberUriImageBitmap(uri: Uri?, maxDimensionPx: Int = 600): State<ImageBit
 }
 
 @Composable
+fun CroppedBitmapCanvas(
+    bitmap: ImageBitmap,
+    crop: PhotoCrop,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.clipToBounds()) {
+        val bw = bitmap.width.toFloat()
+        val bh = bitmap.height.toFloat()
+        val sw = size.width
+        val sh = size.height
+        if (bw > 0f && bh > 0f && sw > 0f && sh > 0f) {
+            val baseScale = max(sw / bw, sh / bh)
+            val scale = baseScale * crop.sanitizedZoom
+            val scaledW = bw * scale
+            val scaledH = bh * scale
+            val overflowX = max(0f, scaledW - sw)
+            val overflowY = max(0f, scaledH - sh)
+            val dx = (sw - scaledW) * 0.5f - (overflowX * 0.5f * crop.sanitizedPanX)
+            val dy = (sh - scaledH) * 0.5f - (overflowY * 0.5f * crop.sanitizedPanY)
+
+            withTransform({
+                translate(left = dx, top = dy)
+                scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+            }) {
+                drawImage(
+                    image = bitmap,
+                    filterQuality = FilterQuality.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun LocalWallpaperThumbnail(
     filePath: String?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
     isNightPlaceholder: Boolean = false,
+    crop: PhotoCrop = PhotoCrop.DEFAULT,
     maxDimensionPx: Int = 800
 ) {
     val bitmap by rememberLocalImageBitmap(filePath = filePath, maxDimensionPx = maxDimensionPx)
     val currentBitmap = bitmap
+    val gradient = if (isNightPlaceholder) {
+        listOf(Color(0xFF141824), Color(0xFF232B3E))
+    } else {
+        listOf(Color(0xFFDDE7FF), Color(0xFFF6E6D8))
+    }
 
     if (currentBitmap != null) {
-        Image(
+        CroppedBitmapCanvas(
             bitmap = currentBitmap,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.Crop,
+            crop = crop,
             modifier = modifier
         )
     } else {
-        val gradient = if (isNightPlaceholder) {
-            listOf(Color(0xFF141824), Color(0xFF232B3E))
-        } else {
-            listOf(Color(0xFFDDE7FF), Color(0xFFF6E6D8))
-        }
         Box(
             modifier = modifier.background(Brush.linearGradient(gradient)),
             contentAlignment = Alignment.Center

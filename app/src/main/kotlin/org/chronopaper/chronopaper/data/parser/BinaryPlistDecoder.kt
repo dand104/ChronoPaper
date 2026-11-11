@@ -1,6 +1,5 @@
 package org.chronopaper.chronopaper.data.parser
 
-import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
@@ -14,7 +13,6 @@ data class HeicSolarEntry(
 )
 
 data class HeicAppleMetadata(
-    val mode: WallpaperMode,
     val solarEntries: List<HeicSolarEntry>,
     val lightIndex: Int?,
     val darkIndex: Int?
@@ -85,7 +83,6 @@ object BinaryPlistDecoder {
             }
             if (entries.isNotEmpty()) {
                 return HeicAppleMetadata(
-                    mode = WallpaperMode.SOLAR,
                     solarEntries = entries,
                     lightIndex = lightIndex ?: entries.maxByOrNull { it.altitude }?.frameIndex,
                     darkIndex = darkIndex ?: entries.minByOrNull { it.altitude }?.frameIndex
@@ -106,7 +103,6 @@ object BinaryPlistDecoder {
             }
             if (entries.isNotEmpty()) {
                 return HeicAppleMetadata(
-                    mode = WallpaperMode.TIME,
                     solarEntries = entries,
                     lightIndex = lightIndex ?: entries.maxByOrNull { it.altitude }?.frameIndex,
                     darkIndex = darkIndex ?: entries.minByOrNull { it.altitude }?.frameIndex
@@ -116,7 +112,6 @@ object BinaryPlistDecoder {
 
         if (lightIndex != null || darkIndex != null) {
             return HeicAppleMetadata(
-                mode = WallpaperMode.THEME,
                 solarEntries = emptyList(),
                 lightIndex = lightIndex ?: darkIndex,
                 darkIndex = darkIndex ?: lightIndex

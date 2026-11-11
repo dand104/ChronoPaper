@@ -23,7 +23,6 @@ data class HomeUiState(
     val settings: UserSettings = UserSettings(),
     val activeTitle: String = "No collection added yet",
     val activeFormatLabel: String = "Add a manual set or import .heic",
-    val allowedModes: List<WallpaperMode> = WallpaperMode.entries,
     val activeLightState: ActiveWallpaperState = ActiveWallpaperState.Fallback(isNightMode = false),
     val activeDarkState: ActiveWallpaperState = ActiveWallpaperState.Fallback(isNightMode = true),
     val solarPosition: SolarPosition = SolarPosition(180.0, 45.0),
@@ -80,39 +79,33 @@ class HomeViewModel(
         val fallbackPair = pairs.firstOrNull()
         val fallbackHeic = packs.firstOrNull()
 
-        val (title, formatLabel, allowed) = when {
-            activeHeic != null -> Triple(
-                activeHeic.title,
-                "HEIC container · ${activeHeic.frameCount} frames",
-                activeHeic.allowedModes
-            )
-            activePair != null -> Triple(
-                activePair.title,
-                "Manual set · ${activePair.frameCount} photo(s)",
-                activePair.allowedModes
-            )
-            fallbackPair != null -> Triple(
-                fallbackPair.title,
-                "Manual set · ${fallbackPair.frameCount} photo(s)",
-                fallbackPair.allowedModes
-            )
-            fallbackHeic != null -> Triple(
-                fallbackHeic.title,
-                "HEIC container · ${fallbackHeic.frameCount} frames",
-                fallbackHeic.allowedModes
-            )
-            else -> Triple(
-                "No collection added yet",
-                "Add a manual set or import .heic",
-                WallpaperMode.entries
-            )
+        val (title, formatLabel) = when {
+            activeHeic != null -> (
+                    activeHeic.title to
+                            "HEIC container · ${activeHeic.frameCount} frames"
+                    )
+            activePair != null -> (
+                    activePair.title to
+                            "Set · ${activePair.frameCount} photo(s)"
+                    )
+            fallbackPair != null -> (
+                    fallbackPair.title to
+                            "Set · ${fallbackPair.frameCount} photo(s)"
+                    )
+            fallbackHeic != null -> (
+                    fallbackHeic.title to
+                            "HEIC container · ${fallbackHeic.frameCount} frames"
+                    )
+            else -> (
+                    "No collection added yet" to
+                            "Add a set or import .heic"
+                    )
         }
 
         HomeUiState(
             settings = settings,
             activeTitle = title,
             activeFormatLabel = formatLabel,
-            allowedModes = allowed,
             activeLightState = lightState,
             activeDarkState = darkState,
             solarPosition = sunPos,
