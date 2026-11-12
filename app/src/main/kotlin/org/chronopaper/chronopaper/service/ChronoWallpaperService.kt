@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -89,6 +90,7 @@ class ChronoWallpaperService : WallpaperService() {
             if (renderer.draw(holder)) {
                 hasDrawnInitialFrame = true
             }
+            container.notifyFrameRefreshRequested()
         }
 
         override fun onComputeColors(): WallpaperColors? {
@@ -132,7 +134,7 @@ class ChronoWallpaperService : WallpaperService() {
             visibleSolarTickerJob = engineScope.launch {
                 while (isActive) {
                     delay(15.minutes)
-                    val mode = container.wallpaperRepository.settings.value.mode
+                    val mode = container.wallpaperRepository.settings.first().mode
 
                     if (mode == WallpaperMode.SOLAR || mode == WallpaperMode.TIME) {
                         container.notifyFrameRefreshRequested()

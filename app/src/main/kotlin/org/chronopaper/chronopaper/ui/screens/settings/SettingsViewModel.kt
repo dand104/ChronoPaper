@@ -69,6 +69,12 @@ class SettingsViewModel(
         }
     }
 
+    fun setShuffleEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setShuffleEnabled(enabled)
+        }
+    }
+
     fun setRotationIntervalHours(hours: Int) {
         viewModelScope.launch {
             repository.updateRotationIntervalHours(hours)

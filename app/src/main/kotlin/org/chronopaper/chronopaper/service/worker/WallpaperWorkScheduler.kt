@@ -26,6 +26,9 @@ class WallpaperWorkScheduler(
     private val workManager: WorkManager
         get() = WorkManager.getInstance(context)
 
+    @Volatile
+    private var lastScheduledIntervalHours: Int? = null
+
     private data class ScheduleConfig(
         val isPeriodicRotationActive: Boolean,
         val rotationIntervalHours: Int
@@ -63,6 +66,7 @@ class WallpaperWorkScheduler(
     }
 
     private fun enqueueOrCancelWork(config: ScheduleConfig) = runCatching {
+        val previousInterval = lastScheduledIntervalHours
         if (config.isPeriodicRotationActive) {
             val interval = config.rotationIntervalHours.toLong().coerceAtLeast(1L)
             val constraints = Constraints.Builder()
@@ -76,17 +80,27 @@ class WallpaperWorkScheduler(
                 .setConstraints(constraints)
                 .build()
 
+            val policy = if (previousInterval == null || previousInterval == config.rotationIntervalHours) {
+                ExistingPeriodicWorkPolicy.KEEP
+            } else {
+                ExistingPeriodicWorkPolicy.UPDATE
+            }
+
             workManager.enqueueUniquePeriodicWork(
                 WORK_PLAYLIST_ROTATION,
-                ExistingPeriodicWorkPolicy.UPDATE,
+                policy,
                 request
             )
+            lastScheduledIntervalHours = config.rotationIntervalHours
         } else {
             workManager.cancelUniqueWork(WORK_PLAYLIST_ROTATION)
+            lastScheduledIntervalHours = null
         }
     }
 
     companion object {
         private const val WORK_PLAYLIST_ROTATION = "chronopaper_playlist_rotation"
+        private const val SCHEDULER_PREFS_NAME = "chronopaper_scheduler_prefs"
+        private const val KEY_LAST_SCHEDULED_INTERVAL_HOURS = "last_scheduled_interval_hours"
     }
 }

@@ -19,6 +19,7 @@ data class UserSettings(
     val activePairId: String? = null,
     val activeHeicPackId: String? = null,
     val autoRotateEnabled: Boolean = false,
+    val shuffleEnabled: Boolean = false,
     val rotationIntervalHours: Int = 24,
     val location: GeoCoordinate = DEFAULT_LOCATION
 ) {

@@ -1,6 +1,5 @@
 package org.chronopaper.chronopaper
 
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,8 +12,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val isFromWallpaperSettings =
-            intent.component?.className?.endsWith("WallpaperSettingsActivity") == true ||
-                    !intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+            intent.component?.className?.endsWith("WallpaperSettingsActivity") == true
 
         setContent {
             ChronoPaperTheme {

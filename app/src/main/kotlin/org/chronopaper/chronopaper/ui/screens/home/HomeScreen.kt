@@ -331,7 +331,7 @@ private fun HeroPreviewCard(
                         if (hasAnyWallpaper) {
                             FilledTonalIconButton(onClick = onRotateNow) {
                                 Icon(
-                                    imageVector = ChronoIcons.Refresh,
+                                    imageVector = ChronoIcons.ArrowForward,
                                     contentDescription = "Next set"
                                 )
                             }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.chronopaper.chronopaper.ChronoApplication
@@ -140,7 +141,7 @@ class PairedSetsViewModel(
             isSaving.value = true
             errorMessage.value = null
             val cleanTitle = title.trim().ifEmpty {
-                "Set #${repository.pairedSets.value.size + 1}"
+                "Set #${repository.pairedSets.first().size + 1}"
             }
             runCatching {
                 repository.createManualSet(
@@ -233,7 +234,7 @@ class PairedSetsViewModel(
                 .removeSuffix(".heic")
                 .removeSuffix(".HEIC")
                 .trim()
-                .ifEmpty { "Dynamic #${repository.heicPacks.value.size + 1}" }
+                .ifEmpty { "Dynamic #${repository.heicPacks.first().size + 1}" }
 
             importHeicUseCase(
                 sourceUri = uri,

@@ -308,11 +308,11 @@ fun SettingsScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Surface(
-                    shape = ExpressiveGroupShapes.forIndex(0, 2),
+                    shape = ExpressiveGroupShapes.forIndex(0, 3),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(ExpressiveGroupShapes.forIndex(0, 2))
+                        .clip(ExpressiveGroupShapes.forIndex(0, 3))
                         .clickable { viewModel.setAutoRotate(!state.settings.autoRotateEnabled) }
                 ) {
                     ListItem(
@@ -336,7 +336,32 @@ fun SettingsScreen(
                 }
 
                 Surface(
-                    shape = ExpressiveGroupShapes.forIndex(1, 2),
+                    shape = ExpressiveGroupShapes.forIndex(1, 3),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(ExpressiveGroupShapes.forIndex(1, 3))
+                        .clickable { viewModel.setShuffleEnabled(!state.settings.shuffleEnabled) }
+                ) {
+                    ListItem(
+                        modifier = SettingsCardItemModifier,
+                        leadingContent = {
+                            Icon(imageVector = ChronoIcons.Shuffle, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = state.settings.shuffleEnabled,
+                                onCheckedChange = null
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    ) {
+                        Text("Shuffle wallpaper pairs")
+                    }
+                }
+
+                Surface(
+                    shape = ExpressiveGroupShapes.forIndex(2, 3),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth()
                 ) {

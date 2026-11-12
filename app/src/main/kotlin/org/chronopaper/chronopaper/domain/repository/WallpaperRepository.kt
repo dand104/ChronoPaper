@@ -1,7 +1,7 @@
 package org.chronopaper.chronopaper.domain.repository
 
 import android.net.Uri
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.GeoCoordinate
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
@@ -10,9 +10,9 @@ import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 
 interface WallpaperRepository {
-    val settings: StateFlow<UserSettings>
-    val pairedSets: StateFlow<List<PairedWallpaperSet>>
-    val heicPacks: StateFlow<List<DynamicHeicPack>>
+    val settings: Flow<UserSettings>
+    val pairedSets: Flow<List<PairedWallpaperSet>>
+    val heicPacks: Flow<List<DynamicHeicPack>>
 
     suspend fun createManualSet(
         title: String,
@@ -57,6 +57,8 @@ interface WallpaperRepository {
     suspend fun setActiveHeicPack(packId: String)
 
     suspend fun setAutoRotateEnabled(enabled: Boolean)
+
+    suspend fun setShuffleEnabled(enabled: Boolean) {}
 
     suspend fun updateLocation(location: GeoCoordinate)
 

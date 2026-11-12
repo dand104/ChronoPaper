@@ -197,6 +197,50 @@ object ChronoIcons {
         }
     }
 
+    val ArrowForward: ImageVector by lazy {
+        vectorIcon("ArrowForward") {
+            moveTo(12f, 4f)
+            lineTo(10.59f, 5.41f)
+            lineTo(16.17f, 11f)
+            horizontalLineTo(4f)
+            verticalLineTo(13f)
+            horizontalLineTo(16.17f)
+            lineTo(10.59f, 18.59f)
+            lineTo(12f, 20f)
+            lineTo(20f, 12f)
+            close()
+        }
+    }
+
+    val Shuffle: ImageVector by lazy {
+        vectorIcon("Shuffle") {
+            moveTo(10.59f, 9.17f)
+            lineTo(5.41f, 4f)
+            lineTo(4f, 5.41f)
+            lineTo(9.17f, 10.58f)
+            lineTo(10.59f, 9.17f)
+            close()
+            moveTo(14.5f, 4f)
+            lineTo(16.54f, 6.04f)
+            lineTo(4f, 18.59f)
+            lineTo(5.41f, 20f)
+            lineTo(17.96f, 7.46f)
+            lineTo(20f, 9.5f)
+            verticalLineTo(4f)
+            horizontalLineTo(14.5f)
+            close()
+            moveTo(14.83f, 13.41f)
+            lineTo(13.42f, 14.82f)
+            lineTo(16.55f, 17.95f)
+            lineTo(14.5f, 20f)
+            horizontalLineTo(20f)
+            verticalLineTo(14.5f)
+            lineTo(17.96f, 16.54f)
+            lineTo(14.83f, 13.41f)
+            close()
+        }
+    }
+
     val Wallpaper: ImageVector by lazy {
         vectorIcon("Wallpaper") {
             moveTo(4f, 4f)

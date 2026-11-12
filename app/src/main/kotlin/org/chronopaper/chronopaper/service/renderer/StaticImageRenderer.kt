@@ -29,6 +29,9 @@ class StaticImageRenderer : WallpaperRenderer {
 
     private var loadedFilePath: String? = null
     private var currentCrop: PhotoCrop = PhotoCrop.DEFAULT
+    private var decodedZoom: Float = 1f
+    private var decodedSurfaceWidth: Int = 0
+    private var decodedSurfaceHeight: Int = 0
     private var isNightFallback: Boolean = false
     private var surfaceWidth: Int = 0
     private var surfaceHeight: Int = 0
@@ -49,10 +52,26 @@ class StaticImageRenderer : WallpaperRenderer {
             is ActiveWallpaperState.StaticBitmap -> {
                 val targetW: Int
                 val targetH: Int
+                val zoomFactor = state.crop.sanitizedZoom
                 synchronized(renderLock) {
                     isNightFallback = state.isNightMode
+                    if (surfaceWidth <= 0 || surfaceHeight <= 0) {
+                        currentCrop = state.crop
+                        return false
+                    }
                     val bmp = currentBitmap
-                    if (state.filePath == loadedFilePath && bmp != null && !bmp.isRecycled) {
+                    val surfaceSizeChanged =
+                        decodedSurfaceWidth != surfaceWidth || decodedSurfaceHeight != surfaceHeight
+                    val zoomIncreasedSignificantly =
+                        zoomFactor > decodedZoom * ZOOM_REDECODE_THRESHOLD
+
+                    if (
+                        state.filePath == loadedFilePath &&
+                        bmp != null &&
+                        !bmp.isRecycled &&
+                        !surfaceSizeChanged &&
+                        !zoomIncreasedSignificantly
+                    ) {
                         if (state.crop != currentCrop) {
                             currentCrop = state.crop
                             recalculateMatrixLocked(bmp.width, bmp.height)
@@ -61,7 +80,6 @@ class StaticImageRenderer : WallpaperRenderer {
                         return false
                     }
                     currentCrop = state.crop
-                    val zoomFactor = state.crop.sanitizedZoom
                     targetW = (surfaceWidth * zoomFactor).roundToInt()
                     targetH = (surfaceHeight * zoomFactor).roundToInt()
                 }
@@ -80,6 +98,9 @@ class StaticImageRenderer : WallpaperRenderer {
                     currentColors = newColors
                     loadedFilePath = state.filePath
                     currentCrop = state.crop
+                    decodedZoom = zoomFactor
+                    decodedSurfaceWidth = surfaceWidth
+                    decodedSurfaceHeight = surfaceHeight
                     recalculateMatrixLocked(newBitmap.width, newBitmap.height)
                     oldBitmap?.recycle()
                     true
@@ -145,6 +166,9 @@ class StaticImageRenderer : WallpaperRenderer {
         val old = currentBitmap
         currentBitmap = null
         loadedFilePath = null
+        decodedZoom = 1f
+        decodedSurfaceWidth = 0
+        decodedSurfaceHeight = 0
         old?.recycle()
     }
 
@@ -228,6 +252,7 @@ class StaticImageRenderer : WallpaperRenderer {
     companion object {
         private const val MAX_COLOR_CACHE_ENTRIES = 32
         private const val COLOR_SAMPLE_DIMENSION = 112
+        private const val ZOOM_REDECODE_THRESHOLD = 1.15f
         private const val DARK_FALLBACK_COLOR = 0xFF121212.toInt()
         private const val LIGHT_FALLBACK_COLOR = 0xFFF5F5F5.toInt()
     }

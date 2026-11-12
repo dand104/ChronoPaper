@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
@@ -14,60 +15,75 @@ import kotlin.math.roundToInt
 object HeicFrameExtractor {
 
     private const val MAX_DECODE_DIMENSION = 3840
+    private const val MAX_META_BOX_BYTES = 16 * 1024 * 1024
 
     data class HeicContainerLayout(
-        val pitmBoxOffset: Int,
+        val pitmBoxOffset: Long,
         val pitmHeaderSize: Int,
         val pitmVersion: Int,
         val originalPitmId: Int,
         val masterItemIds: List<Int>
     )
 
-    fun inspectContainer(heicBytes: ByteArray): HeicContainerLayout {
-        var offset = 0
-        while (offset + 8 <= heicBytes.size) {
-            val (boxSize, headerSize) = readBoxHeader(heicBytes, offset, heicBytes.size)
-            if (boxSize < headerSize || offset + boxSize > heicBytes.size) break
-            val boxType = readFourCc(heicBytes, offset + 4)
+    fun inspectContainer(heicFile: File): HeicContainerLayout {
+        RandomAccessFile(heicFile, "r").use { raf ->
+            val fileLength = raf.length()
+            var offset = 0L
+            while (offset + 8L <= fileLength) {
+                val (boxSize, headerSize) = readBoxHeader(raf, offset, fileLength)
+                if (boxSize < headerSize || offset + boxSize > fileLength) break
+                val boxType = readFourCc(raf, offset + 4L)
 
-            if (boxType == "meta") {
-                return parseMetaBox(
-                    heicBytes = heicBytes,
-                    metaStart = offset + headerSize + 4,
-                    metaEnd = offset + boxSize
-                )
+                if (boxType == "meta") {
+                    val payloadStart = offset + headerSize + 4L
+                    val metaEnd = offset + boxSize
+                    val payloadSize = (metaEnd - payloadStart).toInt()
+                    require(payloadSize in 8..MAX_META_BOX_BYTES) {
+                        "Invalid or oversized 'meta' box ($payloadSize bytes)"
+                    }
+                    val metaBytes = ByteArray(payloadSize)
+                    raf.seek(payloadStart)
+                    raf.readFully(metaBytes)
+                    return parseMetaBox(
+                        heicBytes = metaBytes,
+                        metaStart = 0,
+                        metaEnd = metaBytes.size,
+                        baseFileOffset = payloadStart
+                    )
+                }
+                offset += boxSize
             }
-            offset += boxSize
         }
         throw IllegalArgumentException("Could not locate 'meta' box in HEIC container")
     }
 
     fun overwritePitmId(
-        heicBytes: ByteArray,
-        pitmBoxOffset: Int,
+        heicFile: File,
+        pitmBoxOffset: Long,
         pitmHeaderSize: Int = 8,
         newItemId: Int
     ) {
-        val versionOffset = pitmBoxOffset + pitmHeaderSize
-        val idOffset = versionOffset + 4
-        require(versionOffset >= 0 && idOffset + 4 <= heicBytes.size) {
-            "pitm offset out of bounds: $pitmBoxOffset"
-        }
+        RandomAccessFile(heicFile, "rw").use { raf ->
+            val versionOffset = pitmBoxOffset + pitmHeaderSize
+            val idOffset = versionOffset + 4L
+            require(versionOffset >= 0L && idOffset + 4L <= raf.length()) {
+                "pitm offset out of bounds: $pitmBoxOffset"
+            }
 
-        val version = heicBytes[versionOffset].toInt() and 0xFF
-        if (version == 0) {
-            heicBytes[idOffset] = (newItemId shr 8).toByte()
-            heicBytes[idOffset + 1] = newItemId.toByte()
-        } else {
-            heicBytes[idOffset] = (newItemId shr 24).toByte()
-            heicBytes[idOffset + 1] = (newItemId shr 16).toByte()
-            heicBytes[idOffset + 2] = (newItemId shr 8).toByte()
-            heicBytes[idOffset + 3] = newItemId.toByte()
+            raf.seek(versionOffset)
+            val version = raf.readUnsignedByte()
+            raf.seek(idOffset)
+            if (version == 0) {
+                raf.writeByte((newItemId ushr 8) and 0xFF)
+                raf.writeByte(newItemId and 0xFF)
+            } else {
+                raf.writeInt(newItemId)
+            }
         }
     }
 
     fun extractFrameToWebp(
-        heicBytes: ByteArray,
+        heicFile: File,
         layout: HeicContainerLayout,
         frameIndex: Int,
         targetWidth: Int,
@@ -77,14 +93,14 @@ object HeicFrameExtractor {
         if (layout.masterItemIds.size > 1 || frameIndex > 0) {
             val targetItemId = layout.masterItemIds.getOrElse(frameIndex) { layout.originalPitmId }
             overwritePitmId(
-                heicBytes = heicBytes,
+                heicFile = heicFile,
                 pitmBoxOffset = layout.pitmBoxOffset,
                 pitmHeaderSize = layout.pitmHeaderSize,
                 newItemId = targetItemId
             )
         }
 
-        val source = ImageDecoder.createSource(ByteBuffer.wrap(heicBytes))
+        val source = ImageDecoder.createSource(heicFile)
         val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             val srcW = info.size.width
@@ -146,9 +162,10 @@ object HeicFrameExtractor {
     private fun parseMetaBox(
         heicBytes: ByteArray,
         metaStart: Int,
-        metaEnd: Int
+        metaEnd: Int,
+        baseFileOffset: Long
     ): HeicContainerLayout {
-        var pitmOffset = -1
+        var pitmOffset = -1L
         var pitmHeaderSize = 8
         var pitmVersion = 0
         var masterIds: List<Int> = emptyList()
@@ -163,7 +180,7 @@ object HeicFrameExtractor {
             when (boxType) {
                 "pitm" -> {
                     if (offset + headerSize + 4 <= metaEnd) {
-                        pitmOffset = offset
+                        pitmOffset = baseFileOffset + offset.toLong()
                         pitmHeaderSize = headerSize
                         pitmVersion = heicBytes[offset + headerSize].toInt() and 0xFF
                         val idPos = offset + headerSize + 4
@@ -190,7 +207,7 @@ object HeicFrameExtractor {
             offset += boxSize
         }
 
-        require(pitmOffset != -1) {
+        require(pitmOffset != -1L) {
             "HEIC 'meta' box does not contain a valid 'pitm' box"
         }
 
@@ -243,7 +260,7 @@ object HeicFrameExtractor {
                             (heicBytes[offset + headerSize + 5].toInt() and 0xFF)
                     val itemType = readFourCc(heicBytes, offset + headerSize + 8)
                     when {
-                        itemType == "grid" -> gridIds.add(itemId)
+                        !isHidden && itemType == "grid" -> gridIds.add(itemId)
                         !isHidden && (itemType == "hvc1" || itemType == "av01") ->
                             visibleCodecIds.add(itemId)
                     }
@@ -253,7 +270,7 @@ object HeicFrameExtractor {
                         .int
                     val itemType = readFourCc(heicBytes, offset + headerSize + 10)
                     when {
-                        itemType == "grid" -> gridIds.add(itemId)
+                        !isHidden && itemType == "grid" -> gridIds.add(itemId)
                         !isHidden && (itemType == "hvc1" || itemType == "av01") ->
                             visibleCodecIds.add(itemId)
                     }
@@ -263,6 +280,32 @@ object HeicFrameExtractor {
         }
 
         return gridIds.ifEmpty { visibleCodecIds }
+    }
+
+    private fun readBoxHeader(raf: RandomAccessFile, offset: Long, limit: Long): Pair<Long, Int> {
+        if (offset + 8L > limit) return 0L to 8
+        raf.seek(offset)
+        val size32 = raf.readInt().toLong() and 0xFFFFFFFFL
+        return when {
+            size32 == 1L -> {
+                if (offset + 16L > limit) return 0L to 16
+                raf.seek(offset + 8L)
+                val size64 = raf.readLong()
+                if (size64 < 16L || size64 > (limit - offset)) return 0L to 16
+                size64 to 16
+            }
+
+            size32 == 0L -> (limit - offset) to 8
+            size32 < 8L || size32 > (limit - offset) -> 0L to 8
+            else -> size32 to 8
+        }
+    }
+
+    private fun readFourCc(raf: RandomAccessFile, offset: Long): String {
+        val buf = ByteArray(4)
+        raf.seek(offset)
+        raf.readFully(buf)
+        return String(buf, StandardCharsets.US_ASCII)
     }
 
     private fun readBoxHeader(bytes: ByteArray, offset: Int, limit: Int): Pair<Int, Int> {

@@ -6,7 +6,13 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSliderState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +79,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import org.chronopaper.chronopaper.domain.astronomy.SolarPosition
 import org.chronopaper.chronopaper.domain.model.DynamicHeicPack
 import org.chronopaper.chronopaper.domain.model.PairedWallpaperSet
@@ -97,6 +105,14 @@ fun PairedSetsScreen(
     var showCreateSheet: Boolean by rememberSaveable { mutableStateOf(false) }
     var editingManualSetId: String? by rememberSaveable { mutableStateOf<String?>(null) }
     var editingHeicPackId: String? by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingActivationKey: String? by remember { mutableStateOf(null) }
+
+    LaunchedEffect(pendingActivationKey) {
+        if (pendingActivationKey != null) {
+            delay(2_200L)
+            pendingActivationKey = null
+        }
+    }
 
     val heicLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -228,12 +244,24 @@ fun PairedSetsScreen(
                     items = state.sets,
                     key = { "pair_${it.id}" }
                 ) { set ->
+                    val itemKey = "pair_${set.id}"
                     val isSelected = set.id == state.activePairId
+                    val isPendingSelect = !isSelected && pendingActivationKey == itemKey
                     ManualSetCard(
                         set = set,
                         isSelected = isSelected,
+                        isPendingSelect = isPendingSelect,
                         closestFrameIndex = if (isSelected) state.closestFrameIndex else null,
-                        onSelect = { viewModel.activatePair(set.id) },
+                        onCardTap = {
+                            when {
+                                isSelected -> pendingActivationKey = null
+                                pendingActivationKey == itemKey -> {
+                                    pendingActivationKey = null
+                                    viewModel.activatePair(set.id)
+                                }
+                                else -> pendingActivationKey = itemKey
+                            }
+                        },
                         onEdit = { editingManualSetId = set.id }
                     )
                 }
@@ -242,12 +270,24 @@ fun PairedSetsScreen(
                     items = state.heicPacks,
                     key = { "heic_${it.id}" }
                 ) { pack ->
+                    val itemKey = "heic_${pack.id}"
                     val isSelected = pack.id == state.activeHeicPackId
+                    val isPendingSelect = !isSelected && pendingActivationKey == itemKey
                     HeicContainerCard(
                         pack = pack,
                         isSelected = isSelected,
+                        isPendingSelect = isPendingSelect,
                         closeFrameIndex = if (isSelected) state.closestFrameIndex else null,
-                        onSelect = { viewModel.activateHeicPack(pack.id) },
+                        onCardTap = {
+                            when {
+                                isSelected -> pendingActivationKey = null
+                                pendingActivationKey == itemKey -> {
+                                    pendingActivationKey = null
+                                    viewModel.activateHeicPack(pack.id)
+                                }
+                                else -> pendingActivationKey = itemKey
+                            }
+                        },
                         onEdit = { editingHeicPackId = pack.id }
                     )
                 }
@@ -327,27 +367,43 @@ fun PairedSetsScreen(
 private fun ManualSetCard(
     set: PairedWallpaperSet,
     isSelected: Boolean,
+    isPendingSelect: Boolean,
     closestFrameIndex: Int?,
-    onSelect: () -> Unit,
+    onCardTap: () -> Unit,
     onEdit: () -> Unit
 ) {
     val cornerRadius by animateDpAsState(
-        targetValue = if (isSelected) 32.dp else 22.dp,
+        targetValue = when {
+            isSelected -> 32.dp
+            isPendingSelect -> 28.dp
+            else -> 22.dp
+        },
         animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
         label = "ManualCardCorner"
+    )
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            isPendingSelect -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        label = "ManualCardColor"
     )
 
     Surface(
         shape = RoundedCornerShape(cornerRadius),
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
+        color = containerColor,
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isPendingSelect) {
+                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(cornerRadius))
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(cornerRadius))
-            .clickable(onClick = onSelect)
+            .clickable(onClick = onCardTap)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -357,6 +413,7 @@ private fun ManualSetCard(
                 title = set.title,
                 subtitle = "Set · ${set.frameCount} photo(s)",
                 isSelected = isSelected,
+                isPendingSelect = isPendingSelect,
                 onEdit = onEdit
             )
 
@@ -439,27 +496,43 @@ private fun ManualSetCard(
 private fun HeicContainerCard(
     pack: DynamicHeicPack,
     isSelected: Boolean,
+    isPendingSelect: Boolean,
     closeFrameIndex: Int?,
-    onSelect: () -> Unit,
+    onCardTap: () -> Unit,
     onEdit: () -> Unit
 ) {
     val cornerRadius by animateDpAsState(
-        targetValue = if (isSelected) 32.dp else 22.dp,
+        targetValue = when {
+            isSelected -> 32.dp
+            isPendingSelect -> 28.dp
+            else -> 22.dp
+        },
         animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
         label = "HeicCardCorner"
+    )
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            isPendingSelect -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        label = "HeicCardColor"
     )
 
     Surface(
         shape = RoundedCornerShape(cornerRadius),
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
+        color = containerColor,
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isPendingSelect) {
+                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(cornerRadius))
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(cornerRadius))
-            .clickable(onClick = onSelect)
+            .clickable(onClick = onCardTap)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -469,6 +542,7 @@ private fun HeicContainerCard(
                 title = pack.title,
                 subtitle = "Set · ${pack.frameCount} frames",
                 isSelected = isSelected,
+                isPendingSelect = isPendingSelect,
                 onEdit = onEdit
             )
             LazyRow(
@@ -495,6 +569,7 @@ private fun CollectionCardHeader(
     title: String,
     subtitle: String,
     isSelected: Boolean,
+    isPendingSelect: Boolean,
     onEdit: () -> Unit
 ) {
     Row(
@@ -529,14 +604,39 @@ private fun CollectionCardHeader(
                     style = MaterialTheme.typography.titleLarge
                 )
                 Text(
-                    text = subtitle,
+                    text = if (isPendingSelect) "Click again to set active" else subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    color = when {
+                        isSelected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        isPendingSelect -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = isPendingSelect,
+            enter = fadeIn() + scaleIn(initialScale = 0.85f),
+            exit = fadeOut() + scaleOut(targetScale = 0.85f)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.padding(end = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = ChronoIcons.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 
@@ -821,6 +921,7 @@ private fun CreateManualSetBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = { if (!isSaving) onDismiss() },
+        dragHandle = null,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
@@ -829,6 +930,8 @@ private fun CreateManualSetBottomSheet(
                 .padding(horizontal = 24.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            PassiveSheetDragHandle(modifier = Modifier.align(Alignment.CenterHorizontally))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1055,6 +1158,7 @@ private fun EditHeicPackBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        dragHandle = null,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
@@ -1063,6 +1167,8 @@ private fun EditHeicPackBottomSheet(
                 .padding(horizontal = 24.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            PassiveSheetDragHandle(modifier = Modifier.align(Alignment.CenterHorizontally))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1185,6 +1291,17 @@ private fun EditHeicPackBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+@Composable
+private fun PassiveSheetDragHandle(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(top = 6.dp, bottom = 2.dp)
+            .size(width = 32.dp, height = 4.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+    )
 }
 
 @Composable

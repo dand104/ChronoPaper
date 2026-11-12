@@ -2,7 +2,8 @@ package org.chronopaper.chronopaper.data.parser
 
 import android.util.Base64
 import androidx.exifinterface.media.ExifInterface
-import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 import kotlin.math.PI
 import kotlin.math.cos
@@ -35,10 +36,10 @@ object HeicXmpExtractor {
     private val WHITESPACE_REGEX = Regex("""\s+""")
 
     fun extractMetadata(
-        heicBytes: ByteArray,
+        heicFile: File,
         fallbackFrameCount: Int = 1
     ): HeicAppleMetadata {
-        val xmpXml = extractRawXmpXml(heicBytes)
+        val xmpXml = extractRawXmpXml(heicFile)
         val base64Payload = xmpXml?.let(::findBase64Payload)
         if (base64Payload != null) {
             runCatching {
@@ -83,27 +84,71 @@ object HeicXmpExtractor {
         }
     }
 
-    fun extractRawXmpXml(heicBytes: ByteArray): String? {
+    fun extractRawXmpXml(heicFile: File): String? {
         val exifXmp = runCatching {
-            ByteArrayInputStream(heicBytes).use { input ->
-                ExifInterface(input).getAttribute(ExifInterface.TAG_XMP)
-            }
+            ExifInterface(heicFile).getAttribute(ExifInterface.TAG_XMP)
         }.getOrNull()
 
         if (!exifXmp.isNullOrBlank() && exifXmp.contains("apple_desktop", ignoreCase = true)) {
             return exifXmp
         }
 
+        return runCatching {
+            scanFileForXmpPacket(heicFile) ?: exifXmp
+        }.getOrDefault(exifXmp)
+    }
+
+    private fun scanFileForXmpPacket(heicFile: File): String? {
         val startMarker = "<x:xmpmeta".toByteArray(StandardCharsets.US_ASCII)
         val endMarker = "</x:xmpmeta>".toByteArray(StandardCharsets.US_ASCII)
+        val chunkSize = 64 * 1024
+        val overlap = 64
+        val maxXmpLength = 512 * 1024
 
-        val startIdx = indexOfSubArray(heicBytes, startMarker, 0)
-        if (startIdx == -1) return exifXmp
-        val endIdx = indexOfSubArray(heicBytes, endMarker, startIdx)
-        if (endIdx == -1) return exifXmp
+        RandomAccessFile(heicFile, "r").use { raf ->
+            val fileLen = raf.length()
+            val buffer = ByteArray(chunkSize)
+            var pos = 0L
+            var startOffset = -1L
 
-        val length = (endIdx + endMarker.size) - startIdx
-        return String(heicBytes, startIdx, length, StandardCharsets.UTF_8)
+            while (pos < fileLen) {
+                raf.seek(pos)
+                val read = raf.read(buffer)
+                if (read <= 0) break
+                val slice = if (read == buffer.size) buffer else buffer.copyOf(read)
+
+                if (startOffset == -1L) {
+                    val idx = indexOfSubArray(slice, startMarker, 0)
+                    if (idx != -1) {
+                        startOffset = pos + idx
+                        val afterStart = indexOfSubArray(slice, endMarker, idx + startMarker.size)
+                        if (afterStart != -1) {
+                            val endOffset = pos + afterStart + endMarker.size
+                            val len = (endOffset - startOffset).toInt()
+                            return String(slice, idx, len, StandardCharsets.UTF_8)
+                        }
+                    }
+                } else {
+                    val idx = indexOfSubArray(slice, endMarker, 0)
+                    if (idx != -1) {
+                        val endOffset = pos + idx + endMarker.size
+                        val len = (endOffset - startOffset).toInt()
+                        if (len in 1..maxXmpLength) {
+                            val xmpBytes = ByteArray(len)
+                            raf.seek(startOffset)
+                            raf.readFully(xmpBytes)
+                            return String(xmpBytes, StandardCharsets.UTF_8)
+                        }
+                        return null
+                    }
+                    if (pos - startOffset > maxXmpLength) return null
+                }
+
+                if (read < chunkSize) break
+                pos += (chunkSize - overlap)
+            }
+        }
+        return null
     }
 
     private fun findBase64Payload(xmpXml: String): String? {

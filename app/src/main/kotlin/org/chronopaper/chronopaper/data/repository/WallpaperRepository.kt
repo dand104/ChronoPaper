@@ -2,7 +2,8 @@ package org.chronopaper.chronopaper.data.repository
 
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.chronopaper.chronopaper.data.local.PreferencesDataStore
 import org.chronopaper.chronopaper.data.local.StorageManager
@@ -24,9 +25,9 @@ class DefaultWallpaperRepository(
     private val storageManager: StorageManager
 ) : WallpaperRepository {
 
-    override val settings: StateFlow<UserSettings> = dataStore.settings
-    override val pairedSets: StateFlow<List<PairedWallpaperSet>> = dataStore.pairedSets
-    override val heicPacks: StateFlow<List<DynamicHeicPack>> = dataStore.heicPacks
+    override val settings: Flow<UserSettings> = dataStore.settings
+    override val pairedSets: Flow<List<PairedWallpaperSet>> = dataStore.pairedSets
+    override val heicPacks: Flow<List<DynamicHeicPack>> = dataStore.heicPacks
 
     override suspend fun createManualSet(
         title: String,
@@ -79,7 +80,7 @@ class DefaultWallpaperRepository(
         targetHeight: Int
     ) {
         require(sources.isNotEmpty()) { "Select at least one image" }
-        val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
+        val existing = pairedSets.first().firstOrNull { it.id == pairId } ?: return
         val resolvedPaths = mutableListOf<String>()
         val newlyCreatedFiles = mutableListOf<String>()
 
@@ -104,10 +105,6 @@ class DefaultWallpaperRepository(
         }
 
         val removedOldFiles = existing.imagePaths.filterNot { it in resolvedPaths }
-        if (removedOldFiles.isNotEmpty()) {
-            storageManager.deleteSetFiles(removedOldFiles)
-        }
-
         val normalizedCrops = List(resolvedPaths.size) { idx ->
             imageCrops.getOrNull(idx) ?: PhotoCrop.DEFAULT
         }
@@ -118,6 +115,9 @@ class DefaultWallpaperRepository(
             imageCrops = normalizedCrops
         )
         dataStore.upsertPairedSet(updatedSet)
+        if (removedOldFiles.isNotEmpty()) {
+            storageManager.deleteSetFiles(removedOldFiles)
+        }
     }
 
     override suspend fun updateHeicPack(
@@ -125,7 +125,7 @@ class DefaultWallpaperRepository(
         title: String,
         swapLightDark: Boolean
     ) {
-        val existing = heicPacks.value.firstOrNull { it.id == packId } ?: return
+        val existing = heicPacks.first().firstOrNull { it.id == packId } ?: return
         val currentLight = existing.lightDefaultIndex ?: existing.frames.firstOrNull { it.isLightDefault }?.frameIndex ?: 0
         val currentDark = existing.darkDefaultIndex ?: existing.frames.firstOrNull { it.isDarkDefault }?.frameIndex ?: existing.frames.lastIndex.coerceAtLeast(0)
         val newLight = if (swapLightDark) currentDark else currentLight
@@ -151,13 +151,13 @@ class DefaultWallpaperRepository(
     }
 
     override suspend fun deletePairedSet(pairId: String) {
-        val existing = pairedSets.value.firstOrNull { it.id == pairId } ?: return
-        storageManager.deleteSetFiles(existing.imagePaths)
-        dataStore.removePairedSet(pairId)
+        val currentPairs = pairedSets.first()
+        val existing = currentPairs.firstOrNull { it.id == pairId } ?: return
+        val remainingPairs = currentPairs.filterNot { it.id == pairId }
 
-        if (settings.value.activePairId == pairId) {
-            val nextPair = pairedSets.value.firstOrNull()
-            val fallbackHeic = heicPacks.value.firstOrNull()
+        if (settings.first().activePairId == pairId) {
+            val nextPair = remainingPairs.firstOrNull()
+            val fallbackHeic = heicPacks.first().firstOrNull()
             dataStore.updateSettings { current ->
                 when {
                     nextPair != null -> current.copy(
@@ -175,6 +175,9 @@ class DefaultWallpaperRepository(
                 }
             }
         }
+
+        dataStore.removePairedSet(pairId)
+        storageManager.deleteSetFiles(existing.imagePaths)
     }
 
     override suspend fun importDynamicHeic(
@@ -184,18 +187,17 @@ class DefaultWallpaperRepository(
         targetHeight: Int,
         activateImmediately: Boolean
     ): DynamicHeicPack = withContext(Dispatchers.IO) {
-        val heicBytes = storageManager.readUriBytes(sourceUri)
-        val layout = HeicFrameExtractor.inspectContainer(heicBytes)
-
-        val metadata = HeicXmpExtractor.extractMetadata(
-            heicBytes = heicBytes,
-            fallbackFrameCount = layout.masterItemIds.size.coerceAtLeast(1)
-        )
-
+        val tempHeicFile = storageManager.copyUriToTempFile(sourceUri)
         val packId = UUID.randomUUID().toString()
         val packDir = storageManager.getHeicPackDirectory(packId)
 
         try {
+            val layout = HeicFrameExtractor.inspectContainer(tempHeicFile)
+            val metadata = HeicXmpExtractor.extractMetadata(
+                heicFile = tempHeicFile,
+                fallbackFrameCount = layout.masterItemIds.size.coerceAtLeast(1)
+            )
+
             val requiredIndices = buildSet {
                 metadata.solarEntries.forEach { add(it.frameIndex) }
                 metadata.lightIndex?.let { add(it) }
@@ -209,7 +211,7 @@ class DefaultWallpaperRepository(
             for (frameIndex in requiredIndices) {
                 val outFile = File(packDir, "frame_$frameIndex.webp")
                 HeicFrameExtractor.extractFrameToWebp(
-                    heicBytes = heicBytes,
+                    heicFile = tempHeicFile,
                     layout = layout,
                     frameIndex = frameIndex,
                     targetWidth = targetWidth,
@@ -266,16 +268,17 @@ class DefaultWallpaperRepository(
         } catch (t: Throwable) {
             storageManager.deleteHeicPackFiles(packId)
             throw t
+        } finally {
+            tempHeicFile.delete()
         }
     }
 
     override suspend fun deleteHeicPack(packId: String) {
-        storageManager.deleteHeicPackFiles(packId)
-        dataStore.removeHeicPack(packId)
+        val remainingPacks = heicPacks.first().filterNot { it.id == packId }
 
-        if (settings.value.activeHeicPackId == packId) {
-            val nextHeic = heicPacks.value.firstOrNull()
-            val fallbackPair = pairedSets.value.firstOrNull()
+        if (settings.first().activeHeicPackId == packId) {
+            val nextHeic = remainingPacks.firstOrNull()
+            val fallbackPair = pairedSets.first().firstOrNull()
             dataStore.updateSettings { current ->
                 when {
                     nextHeic != null -> current.copy(
@@ -293,6 +296,9 @@ class DefaultWallpaperRepository(
                 }
             }
         }
+
+        dataStore.removeHeicPack(packId)
+        storageManager.deleteHeicPackFiles(packId)
     }
 
     override suspend fun setActiveMode(mode: WallpaperMode) {
@@ -300,7 +306,7 @@ class DefaultWallpaperRepository(
     }
 
     override suspend fun setActivePair(pairId: String) {
-        if (pairedSets.value.none { it.id == pairId }) return
+        if (pairedSets.first().none { it.id == pairId }) return
         dataStore.updateSettings { current ->
             current.copy(
                 activePairId = pairId,
@@ -310,7 +316,7 @@ class DefaultWallpaperRepository(
     }
 
     override suspend fun setActiveHeicPack(packId: String) {
-        if (heicPacks.value.none { it.id == packId }) return
+        if (heicPacks.first().none { it.id == packId }) return
         dataStore.updateSettings { current ->
             current.copy(
                 activeHeicPackId = packId,
@@ -321,6 +327,10 @@ class DefaultWallpaperRepository(
 
     override suspend fun setAutoRotateEnabled(enabled: Boolean) {
         dataStore.updateSettings { it.copy(autoRotateEnabled = enabled) }
+    }
+
+    override suspend fun setShuffleEnabled(enabled: Boolean) {
+        dataStore.updateSettings { it.copy(shuffleEnabled = enabled) }
     }
 
     override suspend fun updateRotationIntervalHours(hours: Int) {

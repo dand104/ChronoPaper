@@ -1,11 +1,16 @@
 package org.chronopaper.chronopaper.data.local
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -23,83 +28,119 @@ import java.io.File
 class PreferencesDataStore(
     context: Context
 ) {
-    private val appContext = context.applicationContext.createDeviceProtectedStorageContext().also { deContext ->
-        deContext.moveSharedPreferencesFrom(context.applicationContext, PREFS_NAME)
-    }
+    private val rawAppContext = context.applicationContext
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeMutex = Mutex()
 
-    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val collectionsFile = File(appContext.filesDir, COLLECTIONS_FILE_NAME)
+    private class StoreState(
+        val prefs: SharedPreferences,
+        val collectionsFile: File,
+        val settings: MutableStateFlow<UserSettings>,
+        val pairedSets: MutableStateFlow<List<PairedWallpaperSet>>,
+        val heicPacks: MutableStateFlow<List<DynamicHeicPack>>
+    )
 
-    private val initialCollections = loadCollectionsSnapshot()
+    private val storeState = ioScope.async {
+        val deContext = rawAppContext.createDeviceProtectedStorageContext()
+        deContext.moveSharedPreferencesFrom(rawAppContext, PREFS_NAME)
+        val prefs = deContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val collectionsFile = File(deContext.filesDir, COLLECTIONS_FILE_NAME)
 
-    private val _settings = MutableStateFlow(loadSettings())
-    val settings: StateFlow<UserSettings> = _settings.asStateFlow()
+        val (pairs, packs) = loadCollectionsSnapshot(collectionsFile)
+        StoreState(
+            prefs = prefs,
+            collectionsFile = collectionsFile,
+            settings = MutableStateFlow(loadSettings(prefs)),
+            pairedSets = MutableStateFlow(pairs),
+            heicPacks = MutableStateFlow(packs)
+        )
+    }
 
-    private val _pairedSets = MutableStateFlow(initialCollections.first)
-    val pairedSets: StateFlow<List<PairedWallpaperSet>> = _pairedSets.asStateFlow()
+    val settings: Flow<UserSettings> = flow {
+        emitAll(storeState.await().settings)
+    }
 
-    private val _heicPacks = MutableStateFlow(initialCollections.second)
-    val heicPacks: StateFlow<List<DynamicHeicPack>> = _heicPacks.asStateFlow()
+    val pairedSets: Flow<List<PairedWallpaperSet>> = flow {
+        emitAll(storeState.await().pairedSets)
+    }
+
+    val heicPacks: Flow<List<DynamicHeicPack>> = flow {
+        emitAll(storeState.await().heicPacks)
+    }
 
     suspend fun updateSettings(transform: (UserSettings) -> UserSettings) {
         writeMutex.withLock {
-            val updated = transform(_settings.value)
-            saveSettings(updated)
-            _settings.value = updated
+            val state = storeState.await()
+            val updated = transform(state.settings.value)
+            saveSettings(state.prefs, updated)
+            state.settings.value = updated
         }
     }
 
     suspend fun upsertPairedSet(set: PairedWallpaperSet) {
         writeMutex.withLock {
-            val current = _pairedSets.value.toMutableList()
-            val index = current.indexOfFirst { it.id == set.id }
+            val state = storeState.await()
+            val current = state.pairedSets.value.toMutableList()
+            val index = current.indexOfFirst {
+                it.id == set.id
+            }
             if (index >= 0) {
                 current[index] = set
             } else {
                 current.add(set)
             }
-            _pairedSets.value = current
-            persistCollectionsToDisk(current, _heicPacks.value)
+            state.pairedSets.value = current
+            persistCollectionsToDisk(state.collectionsFile, current, state.heicPacks.value)
         }
     }
 
     suspend fun removePairedSet(pairId: String) {
         writeMutex.withLock {
-            val updated = _pairedSets.value.filterNot { it.id == pairId }
-            _pairedSets.value = updated
-            persistCollectionsToDisk(updated, _heicPacks.value)
+            val state = storeState.await()
+            val updated = state.pairedSets.value.filterNot {
+                it.id == pairId
+            }
+            state.pairedSets.value = updated
+            persistCollectionsToDisk(state.collectionsFile, updated, state.heicPacks.value)
         }
     }
 
     suspend fun upsertHeicPack(pack: DynamicHeicPack) {
         writeMutex.withLock {
-            val current = _heicPacks.value.toMutableList()
-            val index = current.indexOfFirst { it.id == pack.id }
+            val state = storeState.await()
+            val current = state.heicPacks.value.toMutableList()
+            val index = current.indexOfFirst {
+                it.id == pack.id
+            }
             if (index >= 0) {
                 current[index] = pack
             } else {
                 current.add(pack)
             }
-            _heicPacks.value = current
-            persistCollectionsToDisk(_pairedSets.value, current)
+            state.heicPacks.value = current
+            persistCollectionsToDisk(state.collectionsFile, state.pairedSets.value, current)
         }
     }
 
     suspend fun removeHeicPack(packId: String) {
         writeMutex.withLock {
-            val updated = _heicPacks.value.filterNot { it.id == packId }
-            _heicPacks.value = updated
-            persistCollectionsToDisk(_pairedSets.value, updated)
+            val state = storeState.await()
+            val updated = state.heicPacks.value.filterNot {
+                it.id == packId
+            }
+            state.heicPacks.value = updated
+            persistCollectionsToDisk(state.collectionsFile, state.pairedSets.value, updated)
         }
     }
 
-    private fun loadSettings(): UserSettings {
+    private fun loadSettings(prefs: SharedPreferences): UserSettings {
         val mode = WallpaperMode.fromNameOrDefault(prefs.getString(KEY_MODE, null))
         val activePairId = prefs.getString(KEY_ACTIVE_PAIR_ID, null)
         val activeHeicId = prefs.getString(KEY_ACTIVE_HEIC_ID, null)
         val autoRotate = prefs.getBoolean(KEY_AUTO_ROTATE_ENABLED, false)
+        val shuffleEnabled = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
         val intervalHours = prefs.getInt(KEY_ROTATION_INTERVAL_HOURS, 24).coerceIn(1, 168)
+
         val lat = Double.fromBits(
             prefs.getLong(KEY_LATITUDE_BITS, UserSettings.DEFAULT_LOCATION.latitude.toRawBits())
         )
@@ -114,25 +155,30 @@ class PreferencesDataStore(
             activePairId = activePairId,
             activeHeicPackId = activeHeicId,
             autoRotateEnabled = autoRotate,
+            shuffleEnabled = shuffleEnabled,
             rotationIntervalHours = intervalHours,
             location = location
         )
     }
 
-    private fun saveSettings(settings: UserSettings) {
+    private suspend fun saveSettings(prefs: SharedPreferences, settings: UserSettings) = withContext(Dispatchers.IO) {
         prefs.edit {
             putString(KEY_MODE, settings.mode.name)
                 .putString(KEY_ACTIVE_PAIR_ID, settings.activePairId)
                 .putString(KEY_ACTIVE_HEIC_ID, settings.activeHeicPackId)
                 .putBoolean(KEY_AUTO_ROTATE_ENABLED, settings.autoRotateEnabled)
+                .putBoolean(KEY_SHUFFLE_ENABLED, settings.shuffleEnabled)
                 .putInt(KEY_ROTATION_INTERVAL_HOURS, settings.rotationIntervalHours)
                 .putLong(KEY_LATITUDE_BITS, settings.location.latitude.toRawBits())
                 .putLong(KEY_LONGITUDE_BITS, settings.location.longitude.toRawBits())
         }
     }
 
-    private fun loadCollectionsSnapshot(): Pair<List<PairedWallpaperSet>, List<DynamicHeicPack>> {
+    private fun loadCollectionsSnapshot(
+        collectionsFile: File
+    ): Pair<List<PairedWallpaperSet>, List<DynamicHeicPack>> {
         if (!collectionsFile.exists()) return emptyList<PairedWallpaperSet>() to emptyList()
+
         return runCatching {
             val root = JSONObject(collectionsFile.readText())
             val pairsArray = root.optJSONArray("pairs") ?: JSONArray()
@@ -168,6 +214,7 @@ class PreferencesDataStore(
             }
 
             val heicArray = root.optJSONArray("heicPacks") ?: JSONArray()
+
             val loadedPacks = buildList(heicArray.length()) {
                 for (i in 0..<heicArray.length()) {
                     val obj = heicArray.getJSONObject(i)
@@ -214,11 +261,13 @@ class PreferencesDataStore(
     }
 
     private suspend fun persistCollectionsToDisk(
+        collectionsFile: File,
         pairs: List<PairedWallpaperSet>,
         packs: List<DynamicHeicPack>
     ) = withContext(Dispatchers.IO) {
         val root = JSONObject()
         val pairsArray = JSONArray()
+
         for (pair in pairs) {
             val pathsArray = JSONArray()
             pair.imagePaths.forEach { pathsArray.put(it) }
@@ -282,6 +331,7 @@ class PreferencesDataStore(
         private const val KEY_ACTIVE_PAIR_ID = "active_pair_id"
         private const val KEY_ACTIVE_HEIC_ID = "active_heic_id"
         private const val KEY_AUTO_ROTATE_ENABLED = "auto_rotate_enabled"
+        private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
         private const val KEY_ROTATION_INTERVAL_HOURS = "rotation_interval_hours"
         private const val KEY_LATITUDE_BITS = "location_lat_bits"
         private const val KEY_LONGITUDE_BITS = "location_lon_bits"

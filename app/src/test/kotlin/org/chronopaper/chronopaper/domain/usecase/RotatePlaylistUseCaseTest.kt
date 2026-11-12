@@ -13,6 +13,7 @@ import org.chronopaper.chronopaper.domain.model.UserSettings
 import org.chronopaper.chronopaper.domain.model.WallpaperMode
 import org.chronopaper.chronopaper.domain.repository.WallpaperRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -56,6 +57,26 @@ class RotatePlaylistUseCaseTest {
         assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
         assertEquals("p1", rotateUseCase())
         assertEquals(WallpaperMode.SOLAR, fakeRepository.settings.value.mode)
+    }
+
+    @Test
+    fun `rotate with shuffleEnabled picks a different entry when multiple exist`() = runBlocking {
+        fakeRepository.setPairedSets(
+            listOf(
+                PairedWallpaperSet("p1", "One", "/l1", "/d1"),
+                PairedWallpaperSet("p2", "Two", "/l2", "/d2"),
+                PairedWallpaperSet("p3", "Three", "/l3", "/d3")
+            )
+        )
+        fakeRepository.setShuffleEnabled(true)
+        fakeRepository.setActivePair("p1")
+
+        var current = "p1"
+        repeat(10) {
+            val next = rotateUseCase()
+            assertNotEquals(current, next)
+            current = next!!
+        }
     }
 
     private class FakeWallpaperRepository : WallpaperRepository {
@@ -114,6 +135,9 @@ class RotatePlaylistUseCaseTest {
 
         override suspend fun deleteHeicPack(packId: String) {}
         override suspend fun setAutoRotateEnabled(enabled: Boolean) {}
+        override suspend fun setShuffleEnabled(enabled: Boolean) {
+            _settings.value = _settings.value.copy(shuffleEnabled = enabled)
+        }
         override suspend fun updateLocation(location: GeoCoordinate) {}
         override suspend fun updateRotationIntervalHours(hours: Int) {}
     }

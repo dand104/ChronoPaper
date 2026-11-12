@@ -98,9 +98,23 @@ class StorageManager(
         return outFile
     }
 
-    suspend fun readUriBytes(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
-        appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IllegalArgumentException("Unable to open InputStream for $uri")
+    suspend fun copyUriToTempFile(
+        uri: Uri,
+        prefix: String = "heic_import_"
+    ): File = withContext(Dispatchers.IO) {
+        val stagingDir = File(appContext.cacheDir, "heic_staging").apply { mkdirs() }
+        val tempFile = File.createTempFile(prefix, ".heic", stagingDir)
+        try {
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output, bufferSize = 64 * 1024)
+                }
+            } ?: throw IllegalArgumentException("Unable to open InputStream for $uri")
+            tempFile
+        } catch (t: Throwable) {
+            tempFile.delete()
+            throw t
+        }
     }
 
     suspend fun deleteSetFiles(paths: List<String>) = withContext(Dispatchers.IO) {
